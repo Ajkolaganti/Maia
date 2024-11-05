@@ -1,90 +1,147 @@
-import React from 'react';
-import { useLocation, Link } from 'react-router-dom';
+import React, { useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import {
-  LayoutDashboard,
-  Clock,
+  Home,
   Users,
-  Building2,
   FileText,
-  User,
+  Clock,
   LogOut,
+  Menu,
+  X,
+  Building2,
+  User,
+  Settings,
 } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 
 interface NavItem {
-  label: string;
-  icon: React.ElementType;
+  name: string;
   path: string;
+  icon: React.ElementType;
 }
 
 const employerNavItems: NavItem[] = [
-  { label: 'Dashboard', icon: LayoutDashboard, path: '/employer/dashboard' },
-  { label: 'Timesheets', icon: Clock, path: '/employer/timesheets' },
-  { label: 'Employees', icon: Users, path: '/employer/employees' },
-  { label: 'Clients', icon: Building2, path: '/employer/clients' },
-  { label: 'Invoices', icon: FileText, path: '/employer/invoices' },
+  { name: 'Dashboard', path: '/employer', icon: Home },
+  { name: 'Employees', path: '/employer/employees', icon: Users },
+  { name: 'Timesheets', path: '/employer/timesheets', icon: Clock },
+  { name: 'Invoices', path: '/employer/invoices', icon: FileText },
+  { name: 'Clients', path: '/employer/clients', icon: Building2 },
 ];
 
 const employeeNavItems: NavItem[] = [
-  { label: 'Dashboard', icon: LayoutDashboard, path: '/employee/dashboard' },
-  { label: 'Timesheets', icon: Clock, path: '/employee/timesheets' },
-  { label: 'Profile', icon: User, path: '/employee/profile' },
+  { name: 'Dashboard', path: '/employee', icon: Home },
+  { name: 'Timesheets', path: '/employee/timesheets', icon: Clock },
+  { name: 'Profile', path: '/employee/profile', icon: User },
 ];
 
-interface DashboardLayoutProps {
-  children: React.ReactNode;
-}
-
-const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
+const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
-  const isEmployer = location.pathname.startsWith('/employer');
-  const navItems = isEmployer ? employerNavItems : employeeNavItems;
+  const navigate = useNavigate();
+  const { logout, userData } = useAuth();
+
+  const navItems = userData?.role === 'employer' ? employerNavItems : employeeNavItems;
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+      navigate('/login');
+    } catch (error) {
+      console.error('Error logging out:', error);
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800">
-      <div className="flex">
-        {/* Sidebar */}
-        <div className="w-64 bg-glass-dark min-h-screen p-4 fixed">
-          <div className="mb-8">
-            <h1 className="text-2xl font-bold text-white">
-              {isEmployer ? 'Employer Portal' : 'Employee Portal'}
-            </h1>
+    <div className="flex h-screen bg-gradient-to-br from-primary-900 via-primary-800 to-primary-900">
+      {/* Sidebar */}
+      <aside
+        className={`fixed inset-y-0 left-0 w-64 transform transition-transform duration-300 ease-in-out z-40
+          ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} 
+          lg:relative lg:translate-x-0 bg-glass-light/10 backdrop-blur-xl border-r border-white/10`}
+      >
+        <div className="flex flex-col h-full">
+          {/* Logo */}
+          <div className="p-6">
+            <h1 className="text-2xl font-bold">EMS</h1>
           </div>
 
-          <nav className="space-y-2">
+          {/* Navigation */}
+          <nav className="flex-1 px-4 space-y-2 overflow-y-auto">
             {navItems.map((item) => {
-              const Icon = item.icon;
               const isActive = location.pathname === item.path;
+              const Icon = item.icon;
 
               return (
                 <Link
                   key={item.path}
                   to={item.path}
-                  className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                    isActive
-                      ? 'bg-primary-600 text-white'
-                      : 'text-white/70 hover:bg-glass-light'
-                  }`}
+                  onClick={() => setSidebarOpen(false)}
+                  className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors
+                    ${isActive 
+                      ? 'bg-primary-500 text-white' 
+                      : 'hover:bg-glass-light'
+                    }`}
                 >
                   <Icon className="w-5 h-5" />
-                  <span>{item.label}</span>
+                  <span>{item.name}</span>
                 </Link>
               );
             })}
           </nav>
 
-          <div className="absolute bottom-4 left-4 right-4">
-            <button className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-white/70 hover:bg-glass-light transition-colors">
+          {/* User section */}
+          <div className="p-4 border-t border-glass-light mt-auto">
+            <div className="flex items-center gap-3 px-4 py-3">
+              <div className="w-10 h-10 rounded-full bg-primary-500/20 flex items-center justify-center">
+                <User className="w-5 h-5 text-primary-300" />
+              </div>
+              <div>
+                <p className="font-medium">{userData?.first_name} {userData?.last_name}</p>
+                <p className="text-sm text-white/70">{userData?.role}</p>
+              </div>
+            </div>
+
+            <button
+              onClick={handleLogout}
+              className="w-full mt-4 flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-glass-light transition-colors text-left"
+            >
               <LogOut className="w-5 h-5" />
               <span>Logout</span>
             </button>
           </div>
         </div>
+      </aside>
 
-        {/* Main Content */}
-        <div className="flex-1 ml-64 p-8">
-          {children}
+      {/* Main content */}
+      <div className="flex-1 flex flex-col min-h-screen">
+        {/* Mobile menu button */}
+        <div className="lg:hidden fixed top-4 left-4 z-50">
+          <button
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="p-2 rounded-lg bg-glass-light hover:bg-glass-medium transition-colors"
+          >
+            {sidebarOpen ? (
+              <X className="w-6 h-6" />
+            ) : (
+              <Menu className="w-6 h-6" />
+            )}
+          </button>
         </div>
+
+        {/* Content area */}
+        <main className="flex-1 p-6 pt-20 lg:pt-6 overflow-x-hidden">
+          {children}
+        </main>
       </div>
+
+      {/* Mobile overlay */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
     </div>
   );
 };
