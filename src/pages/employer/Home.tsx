@@ -121,7 +121,7 @@ const EmployerHome = () => {
           <p className="text-white/70 mt-2">Overview of your organization</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
           <StatCard
             title="Total Employees"
             value={stats.totalEmployees}
@@ -154,7 +154,7 @@ const EmployerHome = () => {
           />
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
           <StatCard
             title="Pending Timesheets"
             value={stats.pendingTimesheets}

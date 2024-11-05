@@ -12,8 +12,11 @@ import {
   Building2,
   User,
   Settings,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useTheme } from '../../context/ThemeContext';
 
 interface NavItem {
   name: string;
@@ -40,6 +43,7 @@ const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) 
   const location = useLocation();
   const navigate = useNavigate();
   const { logout, userData } = useAuth();
+  const { theme, toggleTheme } = useTheme();
 
   const navItems = userData?.role === 'employer' ? employerNavItems : employeeNavItems;
 
@@ -53,12 +57,30 @@ const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) 
   };
 
   return (
-    <div className="flex h-screen bg-gradient-to-br from-primary-900 via-primary-800 to-primary-900">
+    <div className={`flex min-h-screen ${
+      theme === 'dark' 
+        ? 'bg-gradient-to-br from-zinc-900 via-black to-zinc-900' 
+        : 'bg-gradient-to-br from-primary-900 via-primary-800 to-primary-900'
+    }`}>
+      {/* Mobile menu button */}
+      <div className="fixed top-4 left-4 z-50 lg:hidden">
+        <button
+          onClick={() => setSidebarOpen(!sidebarOpen)}
+          className="p-2 rounded-lg bg-zinc-800/50 hover:bg-zinc-700/50 transition-colors"
+        >
+          {sidebarOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+        </button>
+      </div>
+
       {/* Sidebar */}
       <aside
         className={`fixed inset-y-0 left-0 w-64 transform transition-transform duration-300 ease-in-out z-40
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} 
-          lg:relative lg:translate-x-0 bg-glass-light/10 backdrop-blur-xl border-r border-white/10`}
+          lg:relative lg:translate-x-0 ${
+            theme === 'dark'
+              ? 'bg-zinc-900/50 backdrop-blur-xl border-r border-zinc-800/50'
+              : 'bg-glass-light/10 backdrop-blur-xl border-r border-white/10'
+          }`}
       >
         <div className="flex flex-col h-full">
           {/* Logo */}
@@ -79,8 +101,8 @@ const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) 
                   onClick={() => setSidebarOpen(false)}
                   className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors
                     ${isActive 
-                      ? 'bg-primary-500 text-white' 
-                      : 'hover:bg-glass-light'
+                      ? 'bg-zinc-800 text-white' 
+                      : 'hover:bg-zinc-800/50'
                     }`}
                 >
                   <Icon className="w-5 h-5" />
@@ -90,21 +112,49 @@ const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) 
             })}
           </nav>
 
-          {/* User section */}
-          <div className="p-4 border-t border-glass-light mt-auto">
-            <div className="flex items-center gap-3 px-4 py-3">
-              <div className="w-10 h-10 rounded-full bg-primary-500/20 flex items-center justify-center">
-                <User className="w-5 h-5 text-primary-300" />
+          {/* User section with theme toggle */}
+          <div className={`p-4 border-t ${
+            theme === 'dark' ? 'border-zinc-800/50' : 'border-white/10'
+          } mt-auto`}>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-full ${
+                  theme === 'dark' ? 'bg-zinc-800/50' : 'bg-primary-500/20'
+                } flex items-center justify-center`}>
+                  <User className={`w-5 h-5 ${
+                    theme === 'dark' ? 'text-zinc-400' : 'text-primary-300'
+                  }`} />
+                </div>
+                <div>
+                  <p className="font-medium">
+                    {userData?.first_name} {userData?.last_name}
+                  </p>
+                  <p className="text-sm text-white/70">{userData?.role}</p>
+                </div>
               </div>
-              <div>
-                <p className="font-medium">{userData?.first_name} {userData?.last_name}</p>
-                <p className="text-sm text-white/70">{userData?.role}</p>
-              </div>
+              <button
+                onClick={toggleTheme}
+                className={`p-2 rounded-lg transition-colors ${
+                  theme === 'dark'
+                    ? 'hover:bg-zinc-800/50'
+                    : 'hover:bg-glass-light'
+                }`}
+              >
+                {theme === 'dark' ? (
+                  <Sun className="w-5 h-5" />
+                ) : (
+                  <Moon className="w-5 h-5" />
+                )}
+              </button>
             </div>
 
             <button
               onClick={handleLogout}
-              className="w-full mt-4 flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-glass-light transition-colors text-left"
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-left ${
+                theme === 'dark'
+                  ? 'hover:bg-zinc-800/50'
+                  : 'hover:bg-glass-light'
+              }`}
             >
               <LogOut className="w-5 h-5" />
               <span>Logout</span>
@@ -114,32 +164,20 @@ const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) 
       </aside>
 
       {/* Main content */}
-      <div className="flex-1 flex flex-col min-h-screen">
-        {/* Mobile menu button */}
-        <div className="lg:hidden fixed top-4 left-4 z-50">
-          <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="p-2 rounded-lg bg-glass-light hover:bg-glass-medium transition-colors"
-          >
-            {sidebarOpen ? (
-              <X className="w-6 h-6" />
-            ) : (
-              <Menu className="w-6 h-6" />
-            )}
-          </button>
-        </div>
-
-        {/* Content area */}
-        <main className="flex-1 p-6 pt-20 lg:pt-6 overflow-x-hidden">
+      <main className="flex-1 min-h-screen">
+        <div className="container mx-auto px-4 py-6 lg:px-8">
           {children}
-        </main>
-      </div>
+        </div>
+      </main>
 
       {/* Mobile overlay */}
       {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
           onClick={() => setSidebarOpen(false)}
+          className="fixed inset-0 bg-black/80 z-30 lg:hidden"
         />
       )}
     </div>

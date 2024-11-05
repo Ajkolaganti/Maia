@@ -318,77 +318,79 @@ const EmployerTimesheets = () => {
                 </div>
               </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="text-white/70 border-b border-glass-light">
-                      <th className="text-left py-4">Week Ending</th>
-                      <th className="text-left py-4">Hours</th>
-                      <th className="text-left py-4">Status</th>
-                      <th className="text-left py-4">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedEmployee.timesheets.map((timesheet) => (
-                      <motion.tr
-                        key={timesheet.id}
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        className="border-b border-glass-light"
-                      >
-                        <td className="py-4">
-                          {format(new Date(timesheet.week_ending), 'MMM d, yyyy')}
-                        </td>
-                        <td className="py-4">{timesheet.hours}h</td>
-                        <td className="py-4">
-                          <span
-                            className={`px-2 py-1 rounded-full text-xs ${
-                              timesheet.status === 'approved'
-                                ? 'bg-green-400/10 text-green-400'
-                                : timesheet.status === 'rejected'
-                                ? 'bg-red-400/10 text-red-400'
-                                : 'bg-yellow-400/10 text-yellow-400'
-                            }`}
-                          >
-                            {timesheet.status.charAt(0).toUpperCase() + timesheet.status.slice(1)}
-                          </span>
-                        </td>
-                        <td className="py-4">
-                          <div className="flex items-center gap-2">
-                            {timesheet.status === 'submitted' && (
-                              <>
-                                <button
-                                  onClick={() => handleTimesheetAction(timesheet.id, 'approved')}
-                                  className="text-green-400 hover:text-green-300"
-                                  title="Approve"
-                                >
-                                  <CheckCircle className="w-5 h-5" />
-                                </button>
-                                <button
-                                  onClick={() => handleTimesheetAction(timesheet.id, 'rejected')}
-                                  className="text-red-400 hover:text-red-300"
-                                  title="Reject"
-                                >
-                                  <XCircle className="w-5 h-5" />
-                                </button>
-                              </>
-                            )}
-                            <button
-                              onClick={() => {
-                                setSelectedTimesheet(timesheet);
-                                setShowDetailsModal(true);
-                              }}
-                              className="text-primary-400 hover:text-primary-300"
-                              title="View Details"
+              <div className="overflow-x-auto -mx-6 px-6">
+                <div className="inline-block min-w-full align-middle">
+                  <table className="min-w-full">
+                    <thead>
+                      <tr className="text-white/70 border-b border-glass-light">
+                        <th className="text-left py-4">Week Ending</th>
+                        <th className="text-left py-4">Hours</th>
+                        <th className="text-left py-4">Status</th>
+                        <th className="text-left py-4">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedEmployee.timesheets.map((timesheet) => (
+                        <motion.tr
+                          key={timesheet.id}
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          className="border-b border-glass-light"
+                        >
+                          <td className="py-4">
+                            {format(new Date(timesheet.week_ending), 'MMM d, yyyy')}
+                          </td>
+                          <td className="py-4">{timesheet.hours}h</td>
+                          <td className="py-4">
+                            <span
+                              className={`px-2 py-1 rounded-full text-xs ${
+                                timesheet.status === 'approved'
+                                  ? 'bg-green-400/10 text-green-400'
+                                  : timesheet.status === 'rejected'
+                                  ? 'bg-red-400/10 text-red-400'
+                                  : 'bg-yellow-400/10 text-yellow-400'
+                              }`}
                             >
-                              <Eye className="w-5 h-5" />
-                            </button>
-                          </div>
-                        </td>
-                      </motion.tr>
-                    ))}
-                  </tbody>
-                </table>
+                              {timesheet.status.charAt(0).toUpperCase() + timesheet.status.slice(1)}
+                            </span>
+                          </td>
+                          <td className="py-4">
+                            <div className="flex items-center gap-2">
+                              {timesheet.status === 'submitted' && (
+                                <>
+                                  <button
+                                    onClick={() => handleTimesheetAction(timesheet.id, 'approved')}
+                                    className="text-green-400 hover:text-green-300"
+                                    title="Approve"
+                                  >
+                                    <CheckCircle className="w-5 h-5" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleTimesheetAction(timesheet.id, 'rejected')}
+                                    className="text-red-400 hover:text-red-300"
+                                    title="Reject"
+                                  >
+                                    <XCircle className="w-5 h-5" />
+                                  </button>
+                                </>
+                              )}
+                              <button
+                                onClick={() => {
+                                  setSelectedTimesheet(timesheet);
+                                  setShowDetailsModal(true);
+                                }}
+                                className="text-primary-400 hover:text-primary-300"
+                                title="View Details"
+                              >
+                                <Eye className="w-5 h-5" />
+                              </button>
+                            </div>
+                          </td>
+                        </motion.tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </div>

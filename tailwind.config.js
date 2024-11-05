@@ -1,5 +1,5 @@
 /** @type {import('tailwindcss').Config} */
-export default {
+module.exports = {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
     extend: {
@@ -17,9 +17,16 @@ export default {
           900: '#0c4a6e',
         },
         glass: {
-          light: 'rgba(255, 255, 255, 0.1)',
-          medium: 'rgba(255, 255, 255, 0.15)',
+          light: 'rgba(31, 41, 55, 0.4)',
+          medium: 'rgba(17, 24, 39, 0.6)',
           heavy: 'rgba(255, 255, 255, 0.2)',
+        },
+        dark: {
+          glass: {
+            light: 'rgba(24, 24, 27, 0.4)',
+            medium: 'rgba(9, 9, 11, 0.6)',
+            heavy: 'rgba(0, 0, 0, 0.2)',
+          },
         },
       },
       backdropBlur: {
