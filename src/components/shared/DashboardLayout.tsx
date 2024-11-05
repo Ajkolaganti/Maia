@@ -35,6 +35,7 @@ const employerNavItems: NavItem[] = [
 const employeeNavItems: NavItem[] = [
   { name: 'Dashboard', path: '/employee', icon: Home },
   { name: 'Timesheets', path: '/employee/timesheets', icon: Clock },
+  { name: 'Documents', path: '/employee/documents', icon: FileText },
   { name: 'Profile', path: '/employee/profile', icon: User },
 ];
 

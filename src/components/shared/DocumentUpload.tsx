@@ -92,20 +92,28 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
       setUploading(true);
       const file = e.target.files[0];
       const fileExt = file.name.split('.').pop();
-      const fileName = `${Math.random()}.${fileExt}`;
-      const filePath = `${userId}/${selectedCategory}/${fileName}`;
+      const safeFileName = `${Math.random().toString(36).slice(2)}.${fileExt}`;
+      const storagePath = `${userId}/${selectedCategory}/${safeFileName}`;
+
+      console.log('Uploading file to path:', storagePath);
 
       // Upload file to Supabase Storage
       const { error: uploadError } = await supabase.storage
         .from('employee-documents')
-        .upload(filePath, file);
+        .upload(storagePath, file, {
+          cacheControl: '3600',
+          upsert: false
+        });
 
-      if (uploadError) throw uploadError;
+      if (uploadError) {
+        console.error('Upload error:', uploadError);
+        throw uploadError;
+      }
 
       // Get public URL
       const { data: { publicUrl } } = supabase.storage
         .from('employee-documents')
-        .getPublicUrl(filePath);
+        .getPublicUrl(storagePath);
 
       // Save document reference in the database
       const { data: documentData, error: dbError } = await supabase
@@ -116,6 +124,7 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
           subcategory: selectedSubcategory,
           file_name: file.name,
           file_url: publicUrl,
+          storage_path: storagePath,
           expiry_date: expiryDate || null,
           status: expiryDate ? 'valid' : null
         })
@@ -139,7 +148,7 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
     }
   };
 
-  const handleDelete = async (documentId: string, fileUrl: string) => {
+  const handleDelete = async (documentId: string, storagePath: string) => {
     try {
       // Delete from database
       const { error: dbError } = await supabase
@@ -150,14 +159,11 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
       if (dbError) throw dbError;
 
       // Delete from storage
-      const filePath = fileUrl.split('/').pop();
-      if (filePath) {
-        const { error: storageError } = await supabase.storage
-          .from('employee-documents')
-          .remove([`${userId}/${selectedCategory}/${filePath}`]);
+      const { error: storageError } = await supabase.storage
+        .from('employee-documents')
+        .remove([storagePath]);
 
-        if (storageError) throw storageError;
-      }
+      if (storageError) throw storageError;
 
       // Update the parent component
       onUploadComplete(existingDocuments.filter(doc => doc.id !== documentId));
@@ -280,7 +286,7 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
                             </button>
                             {canDelete && (
                               <button
-                                onClick={() => doc.id && handleDelete(doc.id, doc.file_url)}
+                                onClick={() => doc.id && handleDelete(doc.id, doc.storage_path)}
                                 className="p-1 hover:bg-glass-medium rounded transition-colors text-red-400"
                               >
                                 <Trash2 className="w-4 h-4" />
