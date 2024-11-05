@@ -28,42 +28,6 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 
-const sendEmail = async (to: string, subject: string, htmlContent: string) => {
-  try {
-    const response = await fetch('https://api.sendgrid.com/v3/mail/send', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${SENDGRID_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        personalizations: [{
-          to: [{ email: to }],
-        }],
-        from: {
-          email: Deno.env.get('SENDGRID_FROM_EMAIL'),
-          name: 'EMS System',
-        },
-        subject: subject,
-        content: [{
-          type: 'text/html',
-          value: htmlContent,
-        }],
-      }),
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(`SendGrid API error: ${JSON.stringify(error)}`);
-    }
-
-    console.log('Email sent successfully');
-  } catch (error) {
-    console.error('SendGrid Error:', error);
-    throw error;
-  }
-};
-
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -95,22 +59,22 @@ serve(async (req) => {
       }
     });
 
-    // Create user profile in Supabase
-    console.log('Creating user profile in Supabase...');
+    // Create user profile in Supabase with the same UID as Firebase
+    console.log('Creating user profile in Supabase with Firebase UID:', firebaseUser.uid);
     const { data: profileData, error: profileError } = await supabaseAdmin
       .from('users')
-      .insert({
-        id: firebaseUser.uid, // Use Firebase UID
+      .upsert([{
+        id: firebaseUser.uid, // Use Firebase UID as Supabase user ID
         email: email,
         first_name: userData.first_name,
         last_name: userData.last_name,
-        phone: userData.phone,
+        phone: userData.phone || null,
         role: 'employee',
         organization_id: userData.organization_id,
-        client_id: userData.client_id,
+        client_id: userData.client_id || null,
         status: 'active'
-      })
-      .select()
+      }])
+      .select('*')
       .single();
 
     if (profileError) {
@@ -123,17 +87,27 @@ serve(async (req) => {
     }
 
     supabaseUser = profileData;
-    console.log('User profile created:', supabaseUser.id);
+    console.log('User profile created:', supabaseUser);
 
-    // Send welcome email
-    try {
-      const emailContent = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <meta charset="utf-8">
-          </head>
-          <body>
+    // Send welcome email using SendGrid
+    const response = await fetch('https://api.sendgrid.com/v3/mail/send', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${SENDGRID_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        personalizations: [{
+          to: [{ email: email, name: `${userData.first_name} ${userData.last_name}` }],
+        }],
+        from: {
+          email: Deno.env.get('SENDGRID_FROM_EMAIL'),
+          name: organizationName,
+        },
+        subject: `Welcome to ${organizationName}`,
+        content: [{
+          type: 'text/html',
+          value: `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
               <h2 style="color: #333;">Welcome to ${organizationName}!</h2>
               <p>Hello ${userData.first_name} ${userData.last_name},</p>
@@ -145,23 +119,20 @@ serve(async (req) => {
               <p>Please change your password after your first login.</p>
               <p>Best regards,<br>${organizationName} Team</p>
             </div>
-          </body>
-        </html>
-      `;
+          `,
+        }],
+      }),
+    });
 
-      await sendEmail(
-        email,
-        `Welcome to ${organizationName}`,
-        emailContent
-      );
-    } catch (emailError) {
-      console.error('Failed to send welcome email:', emailError);
+    if (!response.ok) {
+      console.error('SendGrid error:', await response.text());
     }
 
     return new Response(
       JSON.stringify({
         message: 'Employee created successfully',
-        userId: firebaseUser.uid
+        userId: firebaseUser.uid,
+        userData: supabaseUser
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

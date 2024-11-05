@@ -3,6 +3,7 @@ import { User, onAuthStateChanged, signInWithEmailAndPassword } from 'firebase/a
 import { auth } from '../config/firebase';
 import { supabase } from '../config/supabase';
 import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 
 interface UserData {
   id: string;
@@ -43,13 +44,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Function to fetch user data from Supabase
   const fetchUserData = async (userId: string) => {
     try {
+      console.log('Fetching user data for ID:', userId);
+      
       const { data, error } = await supabase
         .from('users')
         .select('*')
         .eq('id', userId)
-        .single();
+        .maybeSingle();
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase error:', error);
+        return null;
+      }
+
+      if (!data) {
+        console.log('No user data found');
+        return null;
+      }
+
+      console.log('Fetched user data:', data);
       return data as UserData;
     } catch (error) {
       console.error('Error fetching user data:', error);
@@ -64,7 +77,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       try {
         if (firebaseUser) {
-          // User is signed in
           setUser(firebaseUser);
           
           // Fetch additional user data from Supabase
@@ -73,27 +85,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           
           if (data) {
             setUserData(data);
-            // Redirect based on role
-            if (data.role === 'employer') {
-              navigate('/employer');
-            } else if (data.role === 'employee') {
-              navigate('/employee');
+            // Only navigate if we're not already on the correct route
+            const currentPath = window.location.pathname;
+            const targetPath = data.role === 'employer' ? '/employer' : '/employee';
+            
+            if (!currentPath.startsWith(targetPath)) {
+              navigate(targetPath);
             }
+          } else {
+            // If no user data found, log out
+            await auth.signOut();
+            setUser(null);
+            setUserData(null);
+            navigate('/login');
+            toast.error('User account not found or inactive');
           }
         } else {
-          // User is signed out
           setUser(null);
           setUserData(null);
-          navigate('/login');
+          if (!window.location.pathname.includes('/login') && !window.location.pathname.includes('/register')) {
+            navigate('/login');
+          }
         }
       } catch (error) {
         console.error('Error in auth state change:', error);
+        toast.error('Authentication error occurred');
       } finally {
         setLoading(false);
       }
     });
 
-    // Cleanup subscription
     return () => unsubscribe();
   }, []);
 
@@ -105,14 +126,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (firebaseUser) {
         const data = await fetchUserData(firebaseUser.uid);
         if (data) {
+          if (data.status === 'inactive') {
+            await auth.signOut();
+            throw new Error('Your account is inactive. Please contact support.');
+          }
           setUserData(data);
           // Navigation will be handled by the auth state change listener
         } else {
-          throw new Error('User data not found');
+          throw new Error('User account not found or inactive');
         }
       }
     } catch (error: any) {
       console.error('Login error:', error);
+      let errorMessage = 'Failed to login';
+      
+      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+        errorMessage = 'Invalid email or password';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      toast.error(errorMessage);
       throw error;
     } finally {
       setLoading(false);
@@ -127,11 +161,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       navigate('/login');
     } catch (error) {
       console.error('Logout error:', error);
+      toast.error('Failed to logout');
       throw error;
     }
   };
 
-  // Show loading state
   if (loading) {
     return (
       <div className="flex justify-center items-center min-h-screen bg-gradient-to-br from-primary-900 via-primary-800 to-primary-900">

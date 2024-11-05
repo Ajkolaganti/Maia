@@ -21,6 +21,8 @@ import {
   AlertCircle,
   Clock,
   Send,
+  Upload,
+  Eye,
 } from 'lucide-react';
 import PageTransition from '../../components/shared/PageTransition';
 import { useAuth } from '../../context/AuthContext';
@@ -31,6 +33,7 @@ import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '../../config/firebase';
 import toast from 'react-hot-toast';
 import { format } from 'date-fns';
+import DocumentUpload from '../../components/shared/DocumentUpload';
 
 interface EmployeeWithClient {
   id: string;
@@ -46,6 +49,11 @@ interface EmployeeWithClient {
     name: string;
   } | null;
   status: 'active' | 'inactive';
+  visa_type?: string;
+  visa_expiry?: string;
+  passport_number?: string;
+  passport_expiry?: string;
+  nationality?: string;
 }
 
 interface EmployeeStats {
@@ -81,6 +89,303 @@ interface EmployeeProject {
   endDate?: string;
 }
 
+interface EmployeeDocument {
+  id?: string;
+  user_id: string;
+  category: string;
+  file_name: string;
+  file_url: string;
+  uploaded_at: string;
+  expiry_date?: string | null;
+  status?: 'valid' | 'expired' | 'expiring_soon';
+}
+
+const EditEmployeeModal: React.FC<{
+  isOpen: boolean;
+  onClose: () => void;
+  employee: EmployeeWithClient;
+}> = ({ isOpen, onClose, employee }) => {
+  const [formData, setFormData] = useState({
+    firstName: employee.first_name,
+    lastName: employee.last_name,
+    email: employee.email,
+    phone: employee.phone || '',
+    clientId: employee.client_id || '',
+    status: employee.status,
+    visa_type: employee.visa_type || '',
+    visa_expiry: employee.visa_expiry || '',
+    passport_number: employee.passport_number || '',
+    passport_expiry: employee.passport_expiry || '',
+    nationality: employee.nationality || '',
+  });
+  const [processing, setProcessing] = useState(false);
+  const [availableClients, setAvailableClients] = useState<any[]>([]);
+  const [showDocumentUpload, setShowDocumentUpload] = useState(false);
+
+  useEffect(() => {
+    fetchClients();
+  }, []);
+
+  const fetchClients = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('clients')
+        .select('id, name')
+        .eq('organization_id', employee.organization_id);
+
+      if (error) throw error;
+      setAvailableClients(data || []);
+    } catch (error) {
+      console.error('Error fetching clients:', error);
+      toast.error('Failed to load clients');
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setProcessing(true);
+
+      // Update basic info in users table
+      const { error: userError } = await supabase
+        .from('users')
+        .update({
+          first_name: formData.firstName,
+          last_name: formData.lastName,
+          phone: formData.phone,
+          client_id: formData.clientId || null,
+          status: formData.status,
+        })
+        .eq('id', employee.id);
+
+      if (userError) throw userError;
+
+      // Update or insert visa info in employee_details table
+      const { error: detailsError } = await supabase
+        .from('employee_details')
+        .upsert({
+          user_id: employee.id,
+          visa_type: formData.visa_type,
+          visa_expiry: formData.visa_expiry,
+          passport_number: formData.passport_number,
+          passport_expiry: formData.passport_expiry,
+          nationality: formData.nationality,
+        }, {
+          onConflict: 'user_id',
+        });
+
+      if (detailsError) throw detailsError;
+
+      toast.success('Employee updated successfully');
+      onClose();
+      // Refresh employee list
+      window.location.reload();
+    } catch (error) {
+      console.error('Error updating employee:', error);
+      toast.error('Failed to update employee');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Edit Employee"
+    >
+      <div className="space-y-6">
+        <div className="flex gap-4">
+          <button
+            onClick={() => setShowDocumentUpload(false)}
+            className={`px-4 py-2 rounded-lg transition-colors ${
+              !showDocumentUpload 
+                ? 'bg-ximble-600 text-white' 
+                : 'bg-glass-light hover:bg-glass-medium'
+            }`}
+          >
+            Profile Details
+          </button>
+          <button
+            onClick={() => setShowDocumentUpload(true)}
+            className={`px-4 py-2 rounded-lg transition-colors ${
+              showDocumentUpload 
+                ? 'bg-ximble-600 text-white' 
+                : 'bg-glass-light hover:bg-glass-medium'
+            }`}
+          >
+            Documents
+          </button>
+        </div>
+
+        {showDocumentUpload ? (
+          <div className="space-y-6">
+            <div>
+              <h3 className="text-lg font-medium mb-4">Employee Documents</h3>
+              <DocumentUpload
+                userId={employee.id}
+                category="visa"
+                canDelete={true}
+                onUploadComplete={() => {
+                  // Optionally refresh documents list
+                  toast.success('Document uploaded successfully');
+                }}
+              />
+            </div>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-6">
+            {/* Existing form fields */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm text-white/70 mb-2">First Name</label>
+                <input
+                  type="text"
+                  value={formData.firstName}
+                  onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
+                  className="input-field"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-white/70 mb-2">Last Name</label>
+                <input
+                  type="text"
+                  value={formData.lastName}
+                  onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
+                  className="input-field"
+                  required
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm text-white/70 mb-2">Email</label>
+              <input
+                type="email"
+                value={formData.email}
+                className="input-field"
+                disabled
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm text-white/70 mb-2">Phone</label>
+              <input
+                type="tel"
+                value={formData.phone}
+                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                className="input-field"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm text-white/70 mb-2">Assigned Client</label>
+              <select
+                value={formData.clientId}
+                onChange={(e) => setFormData({ ...formData, clientId: e.target.value })}
+                className="input-field"
+              >
+                <option value="">No Client</option>
+                {availableClients.map((client) => (
+                  <option key={client.id} value={client.id}>
+                    {client.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm text-white/70 mb-2">Status</label>
+              <select
+                value={formData.status}
+                onChange={(e) => setFormData({ ...formData, status: e.target.value as 'active' | 'inactive' })}
+                className="input-field"
+              >
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm text-white/70 mb-2">Visa Type</label>
+              <input
+                type="text"
+                value={formData.visa_type}
+                onChange={(e) => setFormData({ ...formData, visa_type: e.target.value })}
+                className="input-field"
+                placeholder="e.g., Student, Work, PR"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm text-white/70 mb-2">Visa Expiry Date</label>
+              <input
+                type="date"
+                value={formData.visa_expiry}
+                onChange={(e) => setFormData({ ...formData, visa_expiry: e.target.value })}
+                className="input-field"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm text-white/70 mb-2">Passport Number</label>
+              <input
+                type="text"
+                value={formData.passport_number}
+                onChange={(e) => setFormData({ ...formData, passport_number: e.target.value })}
+                className="input-field"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm text-white/70 mb-2">Passport Expiry Date</label>
+              <input
+                type="date"
+                value={formData.passport_expiry}
+                onChange={(e) => setFormData({ ...formData, passport_expiry: e.target.value })}
+                className="input-field"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm text-white/70 mb-2">Nationality</label>
+              <input
+                type="text"
+                value={formData.nationality}
+                onChange={(e) => setFormData({ ...formData, nationality: e.target.value })}
+                className="input-field"
+                placeholder="e.g., Australian"
+              />
+            </div>
+
+            <div className="flex justify-end gap-4">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 bg-glass-light rounded-lg hover:bg-glass-medium transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="btn-primary"
+                disabled={processing}
+              >
+                {processing ? (
+                  <Loader className="w-5 h-5 animate-spin" />
+                ) : (
+                  'Save Changes'
+                )}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </Modal>
+  );
+};
+
 const Employees = () => {
   const { userData } = useAuth();
   const [employees, setEmployees] = useState<EmployeeWithClient[]>([]);
@@ -106,6 +411,7 @@ const Employees = () => {
   const [employeeStats, setEmployeeStats] = useState<EmployeeStats | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [processingEmails, setProcessingEmails] = useState(false);
+  const [showDocumentsModal, setShowDocumentsModal] = useState(false);
 
   useEffect(() => {
     if (userData?.organization_id) {  // Only fetch when organizationId is available
@@ -338,6 +644,245 @@ const Employees = () => {
     }
   };
 
+  const EmployeeDocumentsModal: React.FC<{
+    isOpen: boolean;
+    onClose: () => void;
+    employee: EmployeeWithClient;
+  }> = ({ isOpen, onClose, employee }) => {
+    const [documents, setDocuments] = useState<Record<string, EmployeeDocument[]>>({});
+    const [uploading, setUploading] = useState(false);
+    const [selectedCategory, setSelectedCategory] = useState('visa');
+    const [expiryDate, setExpiryDate] = useState('');
+
+    const documentCategories = {
+      visa: 'Visa Documents',
+      offer_letter: 'Offer Letter',
+      contract: 'Employment Contract',
+      certifications: 'Certifications',
+      other: 'Other Documents'
+    };
+
+    useEffect(() => {
+      if (employee.id) {
+        fetchDocuments();
+      }
+    }, [employee.id]);
+
+    const fetchDocuments = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('employee_documents')
+          .select('*')
+          .eq('user_id', employee.id);
+
+        if (error) throw error;
+
+        // Group documents by category
+        const grouped = (data || []).reduce((acc: Record<string, EmployeeDocument[]>, doc) => {
+          if (!acc[doc.category]) {
+            acc[doc.category] = [];
+          }
+          acc[doc.category].push(doc);
+          return acc;
+        }, {});
+
+        setDocuments(grouped);
+      } catch (error) {
+        console.error('Error fetching documents:', error);
+        toast.error('Failed to load documents');
+      }
+    };
+
+    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (!e.target.files || !e.target.files.length) return;
+
+      try {
+        setUploading(true);
+        const file = e.target.files[0];
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${Math.random()}.${fileExt}`;
+        const filePath = `${employee.id}/${selectedCategory}/${fileName}`;
+
+        // Upload file to Supabase Storage
+        const { error: uploadError } = await supabase.storage
+          .from('employee-documents')
+          .upload(filePath, file);
+
+        if (uploadError) throw uploadError;
+
+        // Get public URL
+        const { data: { publicUrl } } = supabase.storage
+          .from('employee-documents')
+          .getPublicUrl(filePath);
+
+        // Save document reference in the database
+        const { error: dbError } = await supabase
+          .from('employee_documents')
+          .insert({
+            user_id: employee.id,
+            category: selectedCategory,
+            file_name: file.name,
+            file_url: publicUrl,
+            expiry_date: expiryDate || null,
+            status: expiryDate ? 'valid' : null
+          });
+
+        if (dbError) throw dbError;
+
+        await fetchDocuments();
+        toast.success('Document uploaded successfully');
+        setExpiryDate('');
+
+      } catch (error) {
+        console.error('Error uploading document:', error);
+        toast.error('Failed to upload document');
+      } finally {
+        setUploading(false);
+        if (e.target) e.target.value = '';
+      }
+    };
+
+    const handleDeleteDocument = async (documentId: string, fileUrl: string) => {
+      try {
+        // Delete from database
+        const { error: dbError } = await supabase
+          .from('employee_documents')
+          .delete()
+          .eq('id', documentId);
+
+        if (dbError) throw dbError;
+
+        // Delete from storage
+        const filePath = fileUrl.split('/').pop();
+        if (filePath) {
+          const { error: storageError } = await supabase.storage
+            .from('employee-documents')
+            .remove([filePath]);
+
+          if (storageError) throw storageError;
+        }
+
+        await fetchDocuments();
+        toast.success('Document deleted successfully');
+
+      } catch (error) {
+        console.error('Error deleting document:', error);
+        toast.error('Failed to delete document');
+      }
+    };
+
+    return (
+      <Modal
+        isOpen={isOpen}
+        onClose={onClose}
+        title={`Documents - ${employee.first_name} ${employee.last_name}`}
+      >
+        <div className="space-y-6">
+          {/* Upload Section */}
+          <div className="space-y-4">
+            <div className="flex gap-4">
+              <select
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value)}
+                className="input-field flex-1"
+              >
+                {Object.entries(documentCategories).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+              {selectedCategory === 'visa' && (
+                <input
+                  type="date"
+                  value={expiryDate}
+                  onChange={(e) => setExpiryDate(e.target.value)}
+                  className="input-field w-40"
+                  placeholder="Expiry Date"
+                />
+              )}
+            </div>
+            
+            <div className="relative">
+              <input
+                type="file"
+                onChange={handleFileUpload}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                disabled={uploading}
+              />
+              <div className="flex items-center justify-center gap-2 px-4 py-2 border-2 border-dashed border-white/20 rounded-lg hover:border-white/40 transition-colors">
+                {uploading ? (
+                  <Loader className="w-4 h-4 animate-spin" />
+                ) : (
+                  <>
+                    <Upload className="w-4 h-4" />
+                    <span>Choose file or drag & drop</span>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Documents List */}
+          <div className="space-y-6">
+            {Object.entries(documentCategories).map(([category, label]) => (
+              <div key={category}>
+                <h3 className="text-lg font-medium border-b border-white/10 pb-2 mb-4">
+                  {label}
+                </h3>
+                <div className="space-y-2">
+                  {documents[category]?.map((doc) => (
+                    <div
+                      key={doc.id}
+                      className="flex items-center justify-between p-3 bg-glass-light rounded-lg"
+                    >
+                      <div className="flex items-center gap-3">
+                        <FileText className="w-4 h-4 text-primary-400" />
+                        <div>
+                          <p className="text-sm font-medium">{doc.file_name}</p>
+                          {doc.expiry_date && (
+                            <p className={`text-xs ${
+                              doc.status === 'expired' 
+                                ? 'text-red-400' 
+                                : doc.status === 'expiring_soon' 
+                                ? 'text-yellow-400' 
+                                : 'text-white/70'
+                            }`}>
+                              Expires: {new Date(doc.expiry_date).toLocaleDateString()}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={doc.file_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-1 hover:bg-glass-medium rounded transition-colors"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </a>
+                        <button
+                          onClick={() => doc.id && handleDeleteDocument(doc.id, doc.file_url)}
+                          className="p-1 hover:bg-glass-medium rounded transition-colors text-red-400"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  {(!documents[category] || documents[category].length === 0) && (
+                    <p className="text-sm text-white/50 text-center py-2">
+                      No documents uploaded
+                    </p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </Modal>
+    );
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -550,13 +1095,16 @@ const Employees = () => {
         </Modal>
 
         {/* Edit Employee Modal */}
-        <Modal
-          isOpen={showEditModal}
-          onClose={() => setShowEditModal(false)}
-          title="Edit Employee"
-        >
-          {/* Similar form as Add Employee with pre-filled values */}
-        </Modal>
+        {selectedEmployee && (
+          <EditEmployeeModal
+            isOpen={showEditModal}
+            onClose={() => {
+              setShowEditModal(false);
+              setSelectedEmployee(null);
+            }}
+            employee={selectedEmployee}
+          />
+        )}
 
         {/* Employee Details Modal */}
         <Modal
@@ -797,6 +1345,15 @@ const Employees = () => {
             </div>
           )}
         </Modal>
+
+        {/* Documents Modal */}
+        {selectedEmployee && (
+          <EmployeeDocumentsModal
+            isOpen={showDocumentsModal}
+            onClose={() => setShowDocumentsModal(false)}
+            employee={selectedEmployee}
+          />
+        )}
       </div>
     </PageTransition>
   );
