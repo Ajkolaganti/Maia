@@ -1,21 +1,19 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { 
-  User,
-  signInWithEmailAndPassword,
-  signOut,
-  onAuthStateChanged
-} from 'firebase/auth';
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import { User, onAuthStateChanged, signInWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '../config/firebase';
 import { supabase } from '../config/supabase';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 
 interface UserData {
   id: string;
   email: string;
-  role: 'employer' | 'employee';
   first_name: string;
   last_name: string;
-  organization_id?: string;
+  role: 'employer' | 'employee';
+  organization_id: string;
+  client_id?: string;
+  phone?: string;
+  status: 'active' | 'inactive';
 }
 
 interface AuthContextType {
@@ -28,112 +26,93 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [userData, setUserData] = useState<UserData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [initialized, setInitialized] = useState(false);
   const navigate = useNavigate();
-  const location = useLocation();
 
-  const fetchUserData = useCallback(async (uid: string) => {
-    console.log('🔍 Fetching user data from Supabase for UID:', uid);
+  // Function to fetch user data from Supabase
+  const fetchUserData = async (userId: string) => {
     try {
       const { data, error } = await supabase
         .from('users')
         .select('*')
-        .eq('id', uid)
+        .eq('id', userId)
         .single();
 
-      if (error) {
-        console.error('❌ Error fetching user data:', error);
-        return null;
-      }
-
-      console.log('✅ Successfully fetched user data:', data);
+      if (error) throw error;
       return data as UserData;
     } catch (error) {
-      console.error('❌ Exception in fetchUserData:', error);
+      console.error('Error fetching user data:', error);
       return null;
     }
-  }, []);
+  };
 
-  // Handle auth state changes
   useEffect(() => {
-    console.log('🔄 Setting up auth listener');
-    let mounted = true;
-    setLoading(true);
-
+    console.log('Setting up auth state listener');
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      console.log('🔥 Firebase auth state changed:', firebaseUser?.uid);
+      console.log('Auth state changed:', firebaseUser?.email);
       
-      if (!mounted) return;
-
       try {
         if (firebaseUser) {
+          // User is signed in
           setUser(firebaseUser);
-          const supabaseData = await fetchUserData(firebaseUser.uid);
           
-          if (supabaseData) {
-            setUserData(supabaseData);
-          } else {
-            setUser(null);
-            setUserData(null);
+          // Fetch additional user data from Supabase
+          const data = await fetchUserData(firebaseUser.uid);
+          console.log('Fetched user data:', data);
+          
+          if (data) {
+            setUserData(data);
+            // Redirect based on role
+            if (data.role === 'employer') {
+              navigate('/employer');
+            } else if (data.role === 'employee') {
+              navigate('/employee');
+            }
           }
         } else {
+          // User is signed out
           setUser(null);
           setUserData(null);
+          navigate('/login');
         }
       } catch (error) {
-        console.error('❌ Error in auth state change:', error);
-        setUser(null);
-        setUserData(null);
+        console.error('Error in auth state change:', error);
       } finally {
-        if (mounted) {
-          setLoading(false);
-          setInitialized(true);
-        }
+        setLoading(false);
       }
     });
 
-    return () => {
-      mounted = false;
-      unsubscribe();
-    };
-  }, [fetchUserData]);
-
-  // Handle navigation based on auth state
-  useEffect(() => {
-    if (!initialized || loading) return;
-
-    const currentPath = location.pathname;
-    console.log('🚦 Auth state check:', { currentPath, userData, loading });
-
-    if (userData) {
-      const targetPath = `/${userData.role}/dashboard`;
-      if (currentPath === '/login' || currentPath === '/') {
-        console.log('🚀 Redirecting authenticated user to:', targetPath);
-        navigate(targetPath, { replace: true });
-      }
-    } else if (!loading && !currentPath.includes('login') && !currentPath.includes('register')) {
-      console.log('🚀 Redirecting unauthenticated user to login');
-      navigate('/login', { replace: true });
-    }
-  }, [userData, loading, initialized, location.pathname, navigate]);
+    // Cleanup subscription
+    return () => unsubscribe();
+  }, []);
 
   const login = async (email: string, password: string) => {
-    console.log('🔑 Login attempt for:', email);
     try {
       setLoading(true);
-      const { user } = await signInWithEmailAndPassword(auth, email, password);
-      console.log('✅ Firebase authentication successful');
-
-      const userData = await fetchUserData(user.uid);
-      if (!userData) throw new Error('User data not found');
-
-      setUserData(userData);
-    } catch (error) {
-      console.error('❌ Login error:', error);
+      const { user: firebaseUser } = await signInWithEmailAndPassword(auth, email, password);
+      
+      if (firebaseUser) {
+        const data = await fetchUserData(firebaseUser.uid);
+        if (data) {
+          setUserData(data);
+          // Navigation will be handled by the auth state change listener
+        } else {
+          throw new Error('User data not found');
+        }
+      }
+    } catch (error: any) {
+      console.error('Login error:', error);
       throw error;
     } finally {
       setLoading(false);
@@ -141,48 +120,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
-    console.log('🚪 Logout initiated');
     try {
-      setLoading(true);
-      await signOut(auth);
+      await auth.signOut();
       setUser(null);
       setUserData(null);
-      navigate('/login', { replace: true });
+      navigate('/login');
     } catch (error) {
-      console.error('❌ Logout error:', error);
+      console.error('Logout error:', error);
       throw error;
-    } finally {
-      setLoading(false);
     }
   };
 
-  const value = {
-    user,
-    userData,
-    loading,
-    login,
-    logout
-  };
-
-  if (!initialized) {
+  // Show loading state
+  if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-primary-900 via-primary-800 to-primary-900 flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-primary-600 border-t-transparent rounded-full animate-spin" />
+      <div className="flex justify-center items-center min-h-screen bg-gradient-to-br from-primary-900 via-primary-800 to-primary-900">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary-500"></div>
       </div>
     );
   }
 
   return (
-    <AuthContext.Provider value={value}>
+    <AuthContext.Provider value={{ user, userData, loading, login, logout }}>
       {children}
     </AuthContext.Provider>
   );
-};
-
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
-  return context;
 };
