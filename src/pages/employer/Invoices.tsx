@@ -33,15 +33,15 @@ interface InvoiceItem {
 
 interface Invoice {
   id: string;
-  invoiceNumber: string;
-  clientId: string;
+  invoice_number: string;
+  client_id: string;
   client: {
     name: string;
     email: string;
-    billingAddress: string;
+    billing_address: string;
   };
-  issueDate: string;
-  dueDate: string;
+  issue_date: string;
+  due_date: string;
   status: 'draft' | 'pending' | 'paid' | 'overdue';
   subtotal: number;
   tax: number;
@@ -137,15 +137,15 @@ const Invoices = () => {
       // Transform the data to match our interface
       const transformedData = data?.map(invoice => ({
         id: invoice.id,
-        invoiceNumber: invoice.invoice_number,
-        clientId: invoice.client_id,
+        invoice_number: invoice.invoice_number,
+        client_id: invoice.client_id,
         client: {
           name: invoice.client.name,
           email: invoice.client.email,
-          billingAddress: invoice.client.billing_address
+          billing_address: invoice.client.billing_address
         },
-        issueDate: invoice.issue_date,
-        dueDate: invoice.due_date,
+        issue_date: invoice.issue_date,
+        due_date: invoice.due_date,
         status: invoice.status,
         subtotal: invoice.subtotal,
         tax: invoice.tax,
@@ -308,7 +308,7 @@ const Invoices = () => {
     try {
       setProcessing(true);
       
-      // Get organization name from Supabase
+      // Get organization name
       const { data: orgData, error: orgError } = await supabase
         .from('organizations')
         .select('name')
@@ -320,18 +320,18 @@ const Invoices = () => {
       // Call the Edge Function to send the invoice
       const { error: emailError } = await supabase.functions.invoke('sendInvoice', {
         body: {
-          invoiceNumber: invoice.invoiceNumber,
+          invoice_number: invoice.invoice_number,
           clientName: invoice.client.name,
           clientEmail: invoice.client.email,
-          issueDate: invoice.issueDate,
-          dueDate: invoice.dueDate,
+          issue_date: invoice.issue_date,
+          due_date: invoice.due_date,
           items: invoice.items,
           subtotal: invoice.subtotal,
           tax: invoice.tax,
           total: invoice.total,
           notes: invoice.notes,
           organizationName: orgData?.name || 'Our Company',
-          billingAddress: invoice.client.billingAddress
+          billingAddress: invoice.client.billing_address
         }
       });
 
@@ -354,7 +354,7 @@ const Invoices = () => {
       toast.success('Invoice sent successfully');
     } catch (error) {
       console.error('Error sending invoice:', error);
-      toast.error('Failed to send invoice. Please check your email settings.');
+      toast.error('Failed to send invoice. Please try again.');
     } finally {
       setProcessing(false);
     }
@@ -364,32 +364,41 @@ const Invoices = () => {
     try {
       setProcessing(true);
       
+      // Get organization name
+      const { data: orgData, error: orgError } = await supabase
+        .from('organizations')
+        .select('name')
+        .eq('id', userData?.organization_id)
+        .single();
+
+      if (orgError) throw orgError;
+
       const { data, error } = await supabase.functions.invoke('generateInvoicePDF', {
         body: {
-          invoiceNumber: invoice.invoiceNumber,
+          invoice_number: invoice.invoice_number,
           clientName: invoice.client.name,
           clientEmail: invoice.client.email,
-          issueDate: invoice.issueDate,
-          dueDate: invoice.dueDate,
+          issue_date: invoice.issue_date,
+          due_date: invoice.due_date,
           items: invoice.items,
           subtotal: invoice.subtotal,
           tax: invoice.tax,
           total: invoice.total,
           notes: invoice.notes,
-          organizationName: userData?.organization?.name || 'Our Company'
+          organizationName: orgData?.name || 'Our Company'
         }
       });
-  
+
       if (error) throw error;
-  
-      // Convert the array buffer to a blob
-      const pdfBlob = new Blob([data], { type: 'application/pdf' });
+
+      // Create a Blob from the response
+      const blob = new Blob([data], { type: 'application/pdf' });
       
       // Create download link
-      const url = window.URL.createObjectURL(pdfBlob);
+      const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `Invoice-${invoice.invoiceNumber}.pdf`;
+      a.download = `Invoice-${invoice.invoice_number}.pdf`;
       
       // Trigger download
       document.body.appendChild(a);
@@ -398,7 +407,7 @@ const Invoices = () => {
       // Clean up
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
-  
+
       toast.success('PDF generated successfully');
     } catch (error) {
       console.error('Error generating PDF:', error);
@@ -505,7 +514,7 @@ const Invoices = () => {
                     <td className="py-4">
                       <div className="flex items-center gap-2">
                         <FileText className="w-4 h-4 text-primary-400" />
-                        {invoice.invoiceNumber}
+                        {invoice.invoice_number}
                       </div>
                     </td>
                     <td className="py-4">

@@ -85,8 +85,8 @@ const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) 
       >
         <div className="flex flex-col h-full">
           {/* Logo */}
-          <div className="p-6">
-            <h1 className="text-2xl font-bold">EMS</h1>
+          <div className="p-6 flex justify-center items-center mb-4">
+            <h1 className="text-2xl font-bold text-primary-400 hover:text-primary-500 transition-colors cursor-pointer bg-gradient-to-r from-primary-400 via-primary-500 to-primary-600 bg-clip-text text-transparent font-extrabold">WORKING40</h1>
           </div>
 
           {/* Navigation */}

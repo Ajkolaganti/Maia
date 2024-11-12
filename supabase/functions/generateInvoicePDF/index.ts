@@ -13,11 +13,11 @@ serve(async (req) => {
 
   try {
     const {
-      invoiceNumber,
+      invoice_number,
       clientName,
       clientEmail,
-      issueDate,
-      dueDate,
+      issue_date,
+      due_date,
       items,
       subtotal,
       tax,
@@ -28,38 +28,37 @@ serve(async (req) => {
 
     // Create a new PDF document
     const pdfDoc = await PDFDocument.create();
+    const page = pdfDoc.addPage([595.28, 841.89]); // A4 size
+    const { width, height } = page.getSize();
     
     // Embed fonts
     const regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
     const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-    
-    // Add page
-    const page = pdfDoc.addPage([595.28, 841.89]); // A4 size
-    const { width, height } = page.getSize();
-    
-    // Starting position
+
+    // Add content to PDF
     let y = height - 50;
     const margin = 50;
 
-    // Header
-    page.drawText(organizationName, {
+    // Add logo and company name
+    page.drawText('WORKING40', {
       x: margin,
       y: height - 50,
       size: 24,
       font: boldFont,
+      color: rgb(0.05, 0.65, 0.91),
     });
 
-    // Invoice number
-    page.drawText(`Invoice #${invoiceNumber}`, {
-      x: width - 200,
-      y: height - 50,
-      size: 12,
-      font: regularFont,
+    // Add invoice details
+    y -= 50;
+    page.drawText(`Invoice #${invoice_number}`, {
+      x: margin,
+      y,
+      size: 16,
+      font: boldFont,
     });
 
-    // Dates
-    y -= 80;
-    page.drawText(`Issue Date: ${new Date(issueDate).toLocaleDateString()}`, {
+    y -= 30;
+    page.drawText(`Date: ${new Date(issue_date).toLocaleDateString()}`, {
       x: margin,
       y,
       size: 12,
@@ -67,14 +66,14 @@ serve(async (req) => {
     });
 
     y -= 20;
-    page.drawText(`Due Date: ${new Date(dueDate).toLocaleDateString()}`, {
+    page.drawText(`Due Date: ${new Date(due_date).toLocaleDateString()}`, {
       x: margin,
       y,
       size: 12,
       font: regularFont,
     });
 
-    // Client info
+    // Add client details
     y -= 40;
     page.drawText('Bill To:', {
       x: margin,
@@ -99,58 +98,55 @@ serve(async (req) => {
       font: regularFont,
     });
 
-    // Items table header
+    // Add items table
     y -= 40;
-    const columns = ['Description', 'Hours', 'Rate', 'Amount'];
-    const columnWidths = [300, 60, 80, 80];
-    let x = margin;
+    const tableTop = y;
+    const tableHeaders = ['Description', 'Hours', 'Rate', 'Amount'];
+    const columnWidths = [250, 70, 70, 100];
+    let currentX = margin;
 
-    columns.forEach((header, i) => {
+    // Draw table headers
+    tableHeaders.forEach((header, index) => {
       page.drawText(header, {
-        x,
-        y,
+        x: currentX,
+        y: tableTop,
         size: 12,
         font: boldFont,
       });
-      x += columnWidths[i];
+      currentX += columnWidths[index];
     });
 
-    // Draw items
-    y -= 20;
-    items.forEach((item) => {
-      x = margin;
+    // Draw table rows
+    y = tableTop - 20;
+    items.forEach((item: any) => {
+      currentX = margin;
       
-      // Description
-      page.drawText(item.description || '', {
-        x,
+      page.drawText(item.description, {
+        x: currentX,
         y,
         size: 10,
         font: regularFont,
-        maxWidth: columnWidths[0] - 10,
       });
-      x += columnWidths[0];
+      currentX += columnWidths[0];
 
-      // Hours
       page.drawText(item.hours.toString(), {
-        x,
+        x: currentX,
         y,
         size: 10,
         font: regularFont,
       });
-      x += columnWidths[1];
+      currentX += columnWidths[1];
 
-      // Rate
-      page.drawText(`$${item.rate}`, {
-        x,
+      page.drawText(`$${item.rate.toFixed(2)}`, {
+        x: currentX,
         y,
         size: 10,
         font: regularFont,
       });
-      x += columnWidths[2];
+      currentX += columnWidths[2];
 
-      // Amount
-      page.drawText(`$${item.amount.toLocaleString()}`, {
-        x,
+      page.drawText(`$${item.amount.toFixed(2)}`, {
+        x: currentX,
         y,
         size: 10,
         font: regularFont,
@@ -159,55 +155,32 @@ serve(async (req) => {
       y -= 20;
     });
 
-    // Totals
+    // Add totals
     y -= 20;
-    const totalsX = width - 200;
-
-    // Subtotal
-    page.drawText('Subtotal:', {
-      x: totalsX,
-      y,
-      size: 12,
-      font: boldFont,
-    });
-    page.drawText(`$${subtotal.toLocaleString()}`, {
-      x: width - margin - 50,
+    page.drawText(`Subtotal: $${subtotal.toFixed(2)}`, {
+      x: width - margin - 150,
       y,
       size: 12,
       font: regularFont,
     });
 
-    // Tax
     y -= 20;
-    page.drawText('Tax:', {
-      x: totalsX,
-      y,
-      size: 12,
-      font: boldFont,
-    });
-    page.drawText(`$${tax.toLocaleString()}`, {
-      x: width - margin - 50,
+    page.drawText(`Tax: $${tax.toFixed(2)}`, {
+      x: width - margin - 150,
       y,
       size: 12,
       font: regularFont,
     });
 
-    // Total
     y -= 20;
-    page.drawText('Total:', {
-      x: totalsX,
-      y,
-      size: 12,
-      font: boldFont,
-    });
-    page.drawText(`$${total.toLocaleString()}`, {
-      x: width - margin - 50,
+    page.drawText(`Total: $${total.toFixed(2)}`, {
+      x: width - margin - 150,
       y,
       size: 12,
       font: boldFont,
     });
 
-    // Notes
+    // Add notes if any
     if (notes) {
       y -= 40;
       page.drawText('Notes:', {
@@ -216,7 +189,7 @@ serve(async (req) => {
         size: 12,
         font: boldFont,
       });
-      
+
       y -= 20;
       page.drawText(notes, {
         x: margin,
@@ -230,14 +203,13 @@ serve(async (req) => {
     // Generate PDF bytes
     const pdfBytes = await pdfDoc.save();
 
-    // Return PDF with proper headers
     return new Response(
-      new Uint8Array(pdfBytes),
+      pdfBytes,
       {
         headers: {
           ...corsHeaders,
           'Content-Type': 'application/pdf',
-          'Content-Disposition': `attachment; filename="Invoice-${invoiceNumber}.pdf"`,
+          'Content-Disposition': `attachment; filename="Invoice-${invoice_number}.pdf"`,
           'Content-Length': pdfBytes.length.toString(),
         },
       }

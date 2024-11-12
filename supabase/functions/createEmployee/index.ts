@@ -109,6 +109,14 @@ serve(async (req) => {
           type: 'text/html',
           value: `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+              <div style="text-align: center; margin-bottom: 30px;">
+                <div style="background-color: #0ea5e9; display: inline-block; padding: 10px; border-radius: 8px;">
+                  <div style="color: white; font-size: 24px; font-weight: bold;">
+                    <span style="display: inline-block; margin-right: 10px;">⏰</span>
+                    WORKING40
+                  </div>
+                </div>
+              </div>
               <h2 style="color: #333;">Welcome to ${organizationName}!</h2>
               <p>Hello ${userData.first_name} ${userData.last_name},</p>
               <p>Your account has been created. Here are your login credentials:</p>

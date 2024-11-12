@@ -11,6 +11,7 @@ import {
   User,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import Logo from '../shared/Logo';
 
 interface SidebarProps {
   routes: {
@@ -44,11 +45,8 @@ const Sidebar = () => {
       animate={{ x: 0, opacity: 1 }}
       className="h-screen w-64 glass-card p-4 flex flex-col fixed left-0 top-0"
     >
-      <div className="flex items-center gap-2 px-2 mb-8">
-        <div className="w-8 h-8 rounded-lg bg-primary-600 flex items-center justify-center">
-          <Building2 className="w-5 h-5" />
-        </div>
-        <span className="text-xl font-bold">EMS Portal</span>
+      <div className="flex items-center justify-center mb-8">
+        <Logo size="md" />
       </div>
 
       <nav className="flex-1 space-y-2">

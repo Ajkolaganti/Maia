@@ -25,8 +25,24 @@ serve(async (req) => {
     });
 
     // Email template
-    const emailContent = `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+    const emailTemplate = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="text-align: center; margin-bottom: 30px;">
+          <div style="background: linear-gradient(135deg, #0ea5e9, #0284c7); display: inline-block; padding: 20px; border-radius: 16px;">
+            <div style="position: relative; width: 60px; height: 60px; margin: 0 auto;">
+              <div style="position: absolute; inset: 0; border-radius: 50%; background: rgba(0,0,0,0.2);"></div>
+              <div style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;">
+                <span style="color: white; font-size: 24px;">⏰</span>
+              </div>
+            </div>
+            <div style="color: white; font-size: 24px; font-weight: bold; margin-top: 10px;">
+              WORKING40
+            </div>
+            <div style="color: rgba(255,255,255,0.7); font-size: 12px;">
+              TIME MANAGEMENT
+            </div>
+          </div>
+        </div>
         <h2>Welcome to ${organizationName}!</h2>
         <p>Hello ${firstName} ${lastName},</p>
         <p>Your account has been created in the Employee Management System. Here are your login credentials:</p>
@@ -47,7 +63,7 @@ serve(async (req) => {
       to: email,
       subject: `Welcome to ${organizationName} - Your Account Details`,
       content: "This email requires HTML support",
-      html: emailContent,
+      html: emailTemplate,
     });
 
     await client.close();

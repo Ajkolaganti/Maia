@@ -24,14 +24,16 @@ import Modal from '../../components/shared/Modal';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 
-interface Timesheet {
+interface TimesheetEntry {
   id: string;
   user_id: string;
+  week_starting: string;
   week_ending: string;
-  hours: number;
-  description: string;
-  status: 'submitted' | 'approved' | 'rejected';
+  hours: WeeklyHours;
+  total_hours: number;
   documents?: string[];
+  status: 'draft' | 'submitted' | 'approved' | 'rejected';
+  rejection_reason?: string;
   created_at: string;
   users: {
     first_name: string;
@@ -53,7 +55,7 @@ interface EmployeeTimesheets {
       name: string;
     } | null;
   };
-  timesheets: Timesheet[];
+  timesheets: TimesheetEntry[];
   totalHours: number;
   pendingHours: number;
   approvedHours: number;
@@ -123,19 +125,94 @@ const DocumentsModal: React.FC<DocumentsModalProps> = ({
   );
 };
 
+// Add RejectionModal component
+const RejectionModal: React.FC<{
+  isOpen: boolean;
+  onClose: () => void;
+  onSubmit: (reason: string) => Promise<void>;
+  employeeName: string;
+}> = ({ isOpen, onClose, onSubmit, employeeName }) => {
+  const [reason, setReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reason.trim()) {
+      toast.error('Please provide a rejection reason');
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      await onSubmit(reason);
+      onClose();
+    } catch (error) {
+      console.error('Error submitting rejection:', error);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={`Reject Timesheet - ${employeeName}`}
+    >
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className="block text-sm text-white/70 mb-2">
+            Please provide a reason for rejection
+          </label>
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            className="input-field"
+            rows={4}
+            placeholder="Enter rejection reason..."
+            required
+          />
+        </div>
+
+        <div className="flex justify-end gap-4">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 bg-glass-light rounded-lg hover:bg-glass-medium transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="btn-primary"
+            disabled={submitting}
+          >
+            {submitting ? (
+              <Loader className="w-5 h-5 animate-spin" />
+            ) : (
+              'Submit'
+            )}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+};
+
 const EmployerTimesheets = () => {
   const { userData } = useAuth();
-  const [timesheets, setTimesheets] = useState<Timesheet[]>([]);
+  const [timesheets, setTimesheets] = useState<TimesheetEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [showDetailsModal, setShowDetailsModal] = useState(false);
-  const [selectedTimesheet, setSelectedTimesheet] = useState<Timesheet | null>(null);
+  const [selectedTimesheet, setSelectedTimesheet] = useState<TimesheetEntry | null>(null);
   const [processing, setProcessing] = useState(false);
   const [groupedTimesheets, setGroupedTimesheets] = useState<EmployeeTimesheets[]>([]);
   const [selectedEmployee, setSelectedEmployee] = useState<EmployeeTimesheets | null>(null);
   const [showEmployeeTimesheets, setShowEmployeeTimesheets] = useState(false);
   const [showDocumentsModal, setShowDocumentsModal] = useState(false);
+  const [showRejectionModal, setShowRejectionModal] = useState(false);
 
   useEffect(() => {
     if (userData?.organization_id) {
@@ -198,56 +275,95 @@ const EmployerTimesheets = () => {
     }
   };
 
-  const handleTimesheetAction = async (timesheetId: string, action: 'approved' | 'rejected') => {
+  // Add function to send email notification
+  const sendTimesheetNotification = async (
+    email: string,
+    firstName: string,
+    status: 'approved' | 'rejected',
+    reason?: string
+  ) => {
+    try {
+      const { data: orgData } = await supabase
+        .from('organizations')
+        .select('name')
+        .eq('id', userData?.organization_id)
+        .single();
+
+      const { error } = await supabase.functions.invoke('sendTimesheetNotification', {
+        body: {
+          email,
+          firstName,
+          status,
+          reason,
+          organizationName: orgData?.name
+        }
+      });
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error sending notification:', error);
+      throw error;
+    }
+  };
+
+  // Update handleTimesheetAction
+  const handleTimesheetAction = async (timesheetId: string, action: 'approved' | 'rejected', reason?: string) => {
     try {
       setProcessing(true);
       const { error } = await supabase
         .from('timesheets')
-        .update({ status: action })
+        .update({ 
+          status: action,
+          ...(reason && { rejection_reason: reason })
+        })
         .eq('id', timesheetId);
 
       if (error) throw error;
 
-      // Update the local state immediately
-      const updatedTimesheets = groupedTimesheets.map(employeeData => {
-        const updatedEmployeeTimesheets = employeeData.timesheets.map(ts => {
+      // Get timesheet details for notification
+      const timesheet = groupedTimesheets
+        .flatMap(group => group.timesheets)
+        .find(ts => ts.id === timesheetId);
+
+      if (timesheet) {
+        await sendTimesheetNotification(
+          timesheet.users.email,
+          timesheet.users.first_name,
+          action,
+          reason
+        );
+      }
+
+      // Update local state
+      setGroupedTimesheets(prev => prev.map(group => ({
+        ...group,
+        timesheets: group.timesheets.map(ts => {
           if (ts.id === timesheetId) {
-            // Update the status and recalculate hours
-            const oldStatus = ts.status;
-            const hours = ts.hours;
-
-            // Adjust hours based on status change
-            if (oldStatus === 'submitted' && action === 'approved') {
-              employeeData.approvedHours += hours;
-              employeeData.pendingHours -= hours;
-            } else if (oldStatus === 'submitted' && action === 'rejected') {
-              employeeData.pendingHours -= hours;
-            } else if (oldStatus === 'approved' && action === 'rejected') {
-              employeeData.approvedHours -= hours;
-            } else if (oldStatus === 'rejected' && action === 'approved') {
-              employeeData.approvedHours += hours;
-            }
-
-            return { ...ts, status: action };
+            return {
+              ...ts,
+              status: action,
+              ...(reason && { rejection_reason: reason })
+            };
           }
           return ts;
-        });
+        })
+      })));
 
-        return {
-          ...employeeData,
-          timesheets: updatedEmployeeTimesheets
-        };
-      });
-
-      setGroupedTimesheets(updatedTimesheets);
-      setShowDetailsModal(false);
       toast.success(`Timesheet ${action} successfully`);
     } catch (error) {
       console.error(`Error ${action} timesheet:`, error);
       toast.error(`Failed to ${action} timesheet`);
     } finally {
       setProcessing(false);
+      setShowRejectionModal(false);
+      setSelectedTimesheet(null);
     }
+  };
+
+  // Add reject button click handler
+  const handleRejectClick = (timesheet: TimesheetEntry) => {
+    setSelectedTimesheet(timesheet);
+    setShowRejectionModal(true);
   };
 
   const filteredTimesheets = timesheets.filter(timesheet => {
@@ -512,26 +628,20 @@ const EmployerTimesheets = () => {
 
               {selectedTimesheet.status === 'submitted' && (
                 <div className="flex justify-end gap-4 mt-6">
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => handleTimesheetAction(selectedTimesheet.id, 'rejected')}
-                    className="flex items-center gap-2 px-4 py-2 bg-red-500/10 text-red-400 rounded-lg"
-                    disabled={processing}
+                  <button
+                    onClick={() => handleRejectClick(selectedTimesheet)}
+                    className="text-red-400 hover:text-red-300"
+                    title="Reject"
                   >
                     <XCircle className="w-5 h-5" />
-                    Reject
-                  </motion.button>
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
+                  </button>
+                  <button
                     onClick={() => handleTimesheetAction(selectedTimesheet.id, 'approved')}
-                    className="flex items-center gap-2 px-4 py-2 bg-green-500/10 text-green-400 rounded-lg"
-                    disabled={processing}
+                    className="text-green-400 hover:text-green-300"
+                    title="Approve"
                   >
                     <CheckCircle className="w-5 h-5" />
-                    Approve
-                  </motion.button>
+                  </button>
                 </div>
               )}
             </div>
@@ -549,6 +659,21 @@ const EmployerTimesheets = () => {
             documents={selectedTimesheet.documents || []}
             employeeName={`${selectedTimesheet.users.first_name} ${selectedTimesheet.users.last_name}`}
             weekEnding={selectedTimesheet.week_ending}
+          />
+        )}
+
+        {/* Add RejectionModal */}
+        {selectedTimesheet && (
+          <RejectionModal
+            isOpen={showRejectionModal}
+            onClose={() => {
+              setShowRejectionModal(false);
+              setSelectedTimesheet(null);
+            }}
+            onSubmit={async (reason) => {
+              await handleTimesheetAction(selectedTimesheet.id, 'rejected', reason);
+            }}
+            employeeName={`${selectedTimesheet.users.first_name} ${selectedTimesheet.users.last_name}`}
           />
         )}
       </div>

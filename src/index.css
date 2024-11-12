@@ -56,3 +56,43 @@
 ::-webkit-scrollbar-thumb {
   @apply bg-glass-medium rounded-full;
 }
+
+.text-gradient {
+  @apply bg-gradient-to-r from-primary-400 to-primary-600 bg-clip-text text-transparent;
+}
+
+.logo-shadow {
+  filter: drop-shadow(0 0 15px rgba(14, 165, 233, 0.4));
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { 
+    filter: drop-shadow(0 0 15px rgba(14, 165, 233, 0.4));
+  }
+  50% { 
+    filter: drop-shadow(0 0 25px rgba(14, 165, 233, 0.6));
+  }
+}
+
+.text-gradient {
+  @apply bg-gradient-to-r from-primary-400 via-primary-500 to-primary-600 bg-clip-text text-transparent;
+}
+
+/* Add futuristic animations */
+@keyframes glow {
+  0%, 100% { 
+    box-shadow: 0 0 5px rgba(14, 165, 233, 0.2),
+                0 0 10px rgba(14, 165, 233, 0.2),
+                0 0 15px rgba(14, 165, 233, 0.2);
+  }
+  50% { 
+    box-shadow: 0 0 10px rgba(14, 165, 233, 0.4),
+                0 0 20px rgba(14, 165, 233, 0.4),
+                0 0 30px rgba(14, 165, 233, 0.4);
+  }
+}
+
+.animate-glow {
+  animation: glow 2s ease-in-out infinite;
+}

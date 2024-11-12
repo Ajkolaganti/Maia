@@ -644,6 +644,26 @@ const Employees = () => {
     }
   };
 
+  const handleResendWelcomeEmail = async (employeeId: string) => {
+    try {
+      setProcessing(true);
+      const { error } = await supabase.functions.invoke('resendWelcomeEmails', {
+        body: {
+          organizationId: userData?.organization_id,
+          employeeIds: [employeeId]
+        }
+      });
+
+      if (error) throw error;
+      toast.success('Welcome email sent successfully');
+    } catch (error) {
+      console.error('Error sending welcome email:', error);
+      toast.error('Failed to send welcome email');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
   const EmployeeDocumentsModal: React.FC<{
     isOpen: boolean;
     onClose: () => void;
@@ -1316,6 +1336,20 @@ const Employees = () => {
 
               {/* Action Buttons */}
               <div className="flex justify-end gap-4">
+                <button
+                  onClick={() => handleResendWelcomeEmail(selectedEmployee.id)}
+                  className="flex items-center gap-2 px-4 py-2 bg-primary-600/20 text-primary-400 rounded-lg"
+                  disabled={processing}
+                >
+                  {processing ? (
+                    <Loader className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <>
+                      <Send className="w-4 h-4" />
+                      Resend Welcome Email
+                    </>
+                  )}
+                </button>
                 <button
                   onClick={() => {
                     setShowDetailsModal(false);

@@ -7,6 +7,7 @@ import { auth } from '../config/firebase';
 import { sendPasswordResetEmail } from 'firebase/auth';
 import toast from 'react-hot-toast';
 import Modal from '../components/shared/Modal';
+import Logo from '../components/shared/Logo';
 
 const Login = () => {
   const [email, setEmail] = useState('');
@@ -87,9 +88,9 @@ const Login = () => {
         className="w-full max-w-md"
       >
         <div className="backdrop-blur-lg bg-glass-medium rounded-2xl p-8 shadow-xl border border-glass-light">
-          <h1 className="text-3xl font-bold text-white text-center mb-8">
-            Welcome to EMS
-          </h1>
+          <div className="flex justify-center mb-8">
+            <Logo size="lg" />
+          </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
             {error && (
