@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
@@ -17,11 +17,18 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
+import Logo from '../../components/shared/Logo';
+import { supabase } from '../../config/supabase';
 
 interface NavItem {
   name: string;
   path: string;
   icon: React.ElementType;
+}
+
+interface OrganizationInfo {
+  name: string;
+  logo_url?: string;
 }
 
 const employerNavItems: NavItem[] = [
@@ -45,6 +52,28 @@ const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) 
   const navigate = useNavigate();
   const { logout, userData } = useAuth();
   const { theme, toggleTheme } = useTheme();
+  const [orgInfo, setOrgInfo] = useState<OrganizationInfo | null>(null);
+
+  useEffect(() => {
+    if (userData?.organization_id) {
+      fetchOrganizationInfo();
+    }
+  }, [userData?.organization_id]);
+
+  const fetchOrganizationInfo = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('organizations')
+        .select('name, logo_url')
+        .eq('id', userData?.organization_id)
+        .single();
+
+      if (error) throw error;
+      setOrgInfo(data);
+    } catch (error) {
+      console.error('Error fetching organization info:', error);
+    }
+  };
 
   const navItems = userData?.role === 'employer' ? employerNavItems : employeeNavItems;
 
@@ -84,9 +113,23 @@ const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) 
           }`}
       >
         <div className="flex flex-col h-full">
-          {/* Logo */}
-          <div className="p-6 flex justify-center items-center mb-4">
-            <h1 className="text-2xl font-bold text-primary-400 hover:text-primary-500 transition-colors cursor-pointer bg-gradient-to-r from-primary-400 via-primary-500 to-primary-600 bg-clip-text text-transparent font-extrabold">WORKING40</h1>
+          {/* Organization Logo & Name */}
+          <div className="p-6">
+            <div className="flex flex-col items-center gap-3">
+              {orgInfo?.logo_url ? (
+                <img 
+                  src={orgInfo.logo_url} 
+                  alt={orgInfo.name}
+                  className="h-12 w-auto object-contain"
+                />
+              ) : (
+                <Logo size="md" showText={false} />
+              )}
+              <div className="text-center">
+                <h1 className="text-lg font-semibold">{orgInfo?.name || 'Pro Team'}</h1>
+                <p className="text-xs text-white/50">Workforce Management</p>
+              </div>
+            </div>
           </div>
 
           {/* Navigation */}

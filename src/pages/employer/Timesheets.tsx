@@ -29,13 +29,19 @@ interface TimesheetEntry {
   user_id: string;
   week_starting: string;
   week_ending: string;
-  hours: WeeklyHours;
+  hours: {
+    [date: string]: {
+      standard: string;
+      comments?: string;
+    };
+  };
   total_hours: number;
   documents?: string[];
   status: 'draft' | 'submitted' | 'approved' | 'rejected';
   rejection_reason?: string;
   created_at: string;
   users: {
+    id: string;
     first_name: string;
     last_name: string;
     email: string;
@@ -46,15 +52,7 @@ interface TimesheetEntry {
 }
 
 interface EmployeeTimesheets {
-  employee: {
-    id: string;
-    first_name: string;
-    last_name: string;
-    email: string;
-    clients?: {
-      name: string;
-    } | null;
-  };
+  employee: TimesheetEntry['users'];
   timesheets: TimesheetEntry[];
   totalHours: number;
   pendingHours: number;
@@ -222,6 +220,7 @@ const EmployerTimesheets = () => {
 
   const fetchTimesheets = async () => {
     try {
+      setLoading(true);
       const { data, error } = await supabase
         .from('timesheets')
         .select(`
@@ -241,8 +240,21 @@ const EmployerTimesheets = () => {
 
       if (error) throw error;
 
+      // Ensure data is not null and is an array
+      if (!data || !Array.isArray(data)) {
+        console.log('No timesheet data found');
+        setGroupedTimesheets([]);
+        return;
+      }
+
       // Group timesheets by employee
       const grouped = data.reduce((acc: { [key: string]: EmployeeTimesheets }, timesheet) => {
+        // Skip if user data is missing
+        if (!timesheet.users) {
+          console.log('Skipping timesheet with missing user data:', timesheet.id);
+          return acc;
+        }
+
         const employeeId = timesheet.users.id;
         
         if (!acc[employeeId]) {
@@ -254,19 +266,55 @@ const EmployerTimesheets = () => {
             approvedHours: 0
           };
         }
-        
-        acc[employeeId].timesheets.push(timesheet);
-        acc[employeeId].totalHours += timesheet.hours;
-        if (timesheet.status === 'submitted') {
-          acc[employeeId].pendingHours += timesheet.hours;
-        } else if (timesheet.status === 'approved') {
-          acc[employeeId].approvedHours += timesheet.hours;
+
+        try {
+          // Safely parse hours
+          const dailyHours = typeof timesheet.hours === 'string' 
+            ? JSON.parse(timesheet.hours) 
+            : timesheet.hours || {};
+          
+          // Calculate total hours
+          const totalHours = Object.values(dailyHours).reduce((sum: number, day: any) => {
+            try {
+              const [h, m] = (day?.standard || '0:0').split(':').map(Number);
+              return sum + (h || 0) + ((m || 0) / 60);
+            } catch (e) {
+              console.warn('Error parsing hours for day:', day);
+              return sum;
+            }
+          }, 0);
+
+          // Add timesheet to employee's records
+          acc[employeeId].timesheets.push({
+            ...timesheet,
+            hours: dailyHours,
+            total_hours: Math.round(totalHours * 100) / 100
+          });
+
+          // Update employee totals
+          acc[employeeId].totalHours += totalHours;
+          if (timesheet.status === 'submitted') {
+            acc[employeeId].pendingHours += totalHours;
+          } else if (timesheet.status === 'approved') {
+            acc[employeeId].approvedHours += totalHours;
+          }
+        } catch (e) {
+          console.error('Error processing timesheet:', timesheet.id, e);
         }
         
         return acc;
       }, {});
 
-      setGroupedTimesheets(Object.values(grouped));
+      // Convert grouped object to array and set state
+      const groupedArray = Object.values(grouped).map(employee => ({
+        ...employee,
+        totalHours: Math.round(employee.totalHours * 100) / 100,
+        pendingHours: Math.round(employee.pendingHours * 100) / 100,
+        approvedHours: Math.round(employee.approvedHours * 100) / 100
+      }));
+
+      setGroupedTimesheets(groupedArray);
+
     } catch (error) {
       console.error('Error fetching timesheets:', error);
       toast.error('Failed to load timesheets');
@@ -456,7 +504,12 @@ const EmployerTimesheets = () => {
                           <td className="py-4">
                             {format(new Date(timesheet.week_ending), 'MMM d, yyyy')}
                           </td>
-                          <td className="py-4">{timesheet.hours}h</td>
+                          <td className="py-4">
+                            {typeof timesheet.total_hours === 'number' 
+                              ? `${timesheet.total_hours.toFixed(2)}h` 
+                              : '0h'
+                            }
+                          </td>
                           <td className="py-4">
                             <span
                               className={`px-2 py-1 rounded-full text-xs ${

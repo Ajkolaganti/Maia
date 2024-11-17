@@ -29,17 +29,11 @@ serve(async (req) => {
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
         <div style="text-align: center; margin-bottom: 30px;">
           <div style="background: linear-gradient(135deg, #0ea5e9, #0284c7); display: inline-block; padding: 20px; border-radius: 16px;">
-            <div style="position: relative; width: 60px; height: 60px; margin: 0 auto;">
-              <div style="position: absolute; inset: 0; border-radius: 50%; background: rgba(0,0,0,0.2);"></div>
-              <div style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;">
-                <span style="color: white; font-size: 24px;">⏰</span>
-              </div>
-            </div>
-            <div style="color: white; font-size: 24px; font-weight: bold; margin-top: 10px;">
-              WORKING40
+            <div style="color: white; font-size: 24px; font-weight: bold;">
+              PRO<span style="color: #38bdf8">TEAM</span>
             </div>
             <div style="color: rgba(255,255,255,0.7); font-size: 12px;">
-              TIME MANAGEMENT
+              WORKFORCE MANAGEMENT
             </div>
           </div>
         </div>

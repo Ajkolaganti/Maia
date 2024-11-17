@@ -69,21 +69,25 @@ const EmployeeHome = () => {
 
       if (error) throw error;
 
-      const totalHours = timesheets?.reduce((sum, ts) => sum + (ts.hours || 0), 0) || 0;
-      const pendingTimesheets = timesheets?.filter(ts => ts.status === 'pending').length || 0;
-      const approvedTimesheets = timesheets?.filter(ts => ts.status === 'approved').length || 0;
-      const totalEarnings = timesheets?.reduce((sum, ts) => {
-        if (ts.status === 'approved') {
-          return sum + (ts.hours * (ts.rate || 0));
-        }
-        return sum;
+      const totalHours = timesheets?.reduce((sum, ts) => {
+        const dailyHours = typeof ts.hours === 'string' 
+          ? JSON.parse(ts.hours) 
+          : ts.hours;
+        
+        return sum + Object.values(dailyHours).reduce((daySum: number, day: any) => {
+          const [h, m] = (day.standard || '0:0').split(':').map(Number);
+          return daySum + h + (m / 60);
+        }, 0);
       }, 0) || 0;
 
+      const pendingTimesheets = timesheets?.filter(ts => ts.status === 'submitted').length || 0;
+      const approvedTimesheets = timesheets?.filter(ts => ts.status === 'approved').length || 0;
+
       setStats({
-        totalHours,
+        totalHours: Math.round(totalHours * 100) / 100,
         pendingTimesheets,
         approvedTimesheets,
-        totalEarnings,
+        totalEarnings: 0
       });
     } catch (error) {
       console.error('Error fetching dashboard stats:', error);
@@ -123,26 +127,39 @@ const EmployeeHome = () => {
         .from('timesheets')
         .select('*')
         .eq('user_id', userData?.id)
-        .gte('week_ending', format(startOfCurrentMonth, 'yyyy-MM-dd'))
+        .gte('week_starting', format(startOfCurrentMonth, 'yyyy-MM-dd'))
         .lte('week_ending', format(endOfCurrentMonth, 'yyyy-MM-dd'));
 
       if (error) throw error;
 
-      const totalHours = timesheets?.reduce((sum, ts) => sum + (ts.hours || 0), 0) || 0;
-      const approvedHours = timesheets?.reduce((sum, ts) => 
-        ts.status === 'approved' ? sum + (ts.hours || 0) : sum, 0) || 0;
-      const pendingHours = timesheets?.reduce((sum, ts) => 
-        ts.status === 'submitted' ? sum + (ts.hours || 0) : sum, 0) || 0;
+      const calculateHoursFromTimesheet = (ts: any) => {
+        const dailyHours = typeof ts.hours === 'string' 
+          ? JSON.parse(ts.hours) 
+          : ts.hours;
+        
+        return Object.values(dailyHours).reduce((sum: number, day: any) => {
+          const [h, m] = (day.standard || '0:0').split(':').map(Number);
+          return sum + h + (m / 60);
+        }, 0);
+      };
 
-      // Calculate weeks in current month
+      const totalHours = timesheets?.reduce((sum, ts) => 
+        sum + calculateHoursFromTimesheet(ts), 0) || 0;
+
+      const approvedHours = timesheets?.reduce((sum, ts) => 
+        ts.status === 'approved' ? sum + calculateHoursFromTimesheet(ts) : sum, 0) || 0;
+
+      const pendingHours = timesheets?.reduce((sum, ts) => 
+        ts.status === 'submitted' ? sum + calculateHoursFromTimesheet(ts) : sum, 0) || 0;
+
       const weeksInMonth = differenceInWeeks(endOfCurrentMonth, startOfCurrentMonth) + 1;
       const averageHoursPerWeek = totalHours / weeksInMonth;
 
       setCurrentMonthStats({
-        totalHours,
-        approvedHours,
-        pendingHours,
-        averageHoursPerWeek
+        totalHours: Math.round(totalHours * 100) / 100,
+        approvedHours: Math.round(approvedHours * 100) / 100,
+        pendingHours: Math.round(pendingHours * 100) / 100,
+        averageHoursPerWeek: Math.round(averageHoursPerWeek * 100) / 100
       });
     } catch (error) {
       console.error('Error fetching current month stats:', error);

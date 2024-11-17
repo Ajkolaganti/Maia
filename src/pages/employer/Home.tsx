@@ -30,6 +30,7 @@ interface DashboardStats {
 const EmployerHome = () => {
   const { userData } = useAuth();
   const [loading, setLoading] = useState(true);
+  const [orgInfo, setOrgInfo] = useState<{ name: string } | null>(null);
   const [stats, setStats] = useState<DashboardStats>({
     totalEmployees: 0,
     activeClients: 0,
@@ -44,8 +45,24 @@ const EmployerHome = () => {
   useEffect(() => {
     if (userData?.organization_id) {
       fetchDashboardStats();
+      fetchOrganizationInfo();
     }
   }, [userData?.organization_id]);
+
+  const fetchOrganizationInfo = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('organizations')
+        .select('name')
+        .eq('id', userData?.organization_id)
+        .single();
+
+      if (error) throw error;
+      setOrgInfo(data);
+    } catch (error) {
+      console.error('Error fetching organization info:', error);
+    }
+  };
 
   const fetchDashboardStats = async () => {
     try {
@@ -87,8 +104,30 @@ const EmployerHome = () => {
       const timesheets = timesheetsData.data || [];
       const invoices = invoicesData.data || [];
 
-      // Calculate timesheet stats
-      const totalHours = timesheets.reduce((sum, ts) => sum + (ts.hours || 0), 0);
+      // Calculate timesheet stats with null checks
+      const totalHours = timesheets.reduce((sum, ts) => {
+        // Add null check for hours
+        if (!ts.hours) return sum;
+
+        // Parse hours object
+        const dailyHours = typeof ts.hours === 'string' 
+          ? JSON.parse(ts.hours) 
+          : ts.hours;
+        
+        // Add null check for dailyHours
+        if (!dailyHours) return sum;
+
+        // Calculate total hours from daily entries with null checks
+        const timesheetTotal = Object.values(dailyHours).reduce((daySum: number, day: any) => {
+          if (!day || !day.standard) return daySum;
+          
+          const [h, m] = (day.standard || '0:0').split(':').map(Number);
+          return daySum + (h || 0) + ((m || 0) / 60);
+        }, 0);
+
+        return sum + timesheetTotal;
+      }, 0);
+
       const pendingTimesheets = timesheets.filter(ts => ts.status === 'submitted').length;
       const approvedTimesheets = timesheets.filter(ts => ts.status === 'approved').length;
       const averageHoursPerEmployee = totalEmployees ? totalHours / totalEmployees : 0;
@@ -102,9 +141,9 @@ const EmployerHome = () => {
         totalRevenue,
         pendingTimesheets,
         approvedTimesheets,
-        totalHours,
-        averageHoursPerEmployee,
-        clientSatisfactionRate: 0, // This would need a separate implementation
+        totalHours: Math.round(totalHours * 100) / 100,
+        averageHoursPerEmployee: Math.round(averageHoursPerEmployee * 100) / 100,
+        clientSatisfactionRate: 0,
       });
     } catch (error) {
       console.error('Error fetching dashboard stats:', error);
@@ -118,7 +157,9 @@ const EmployerHome = () => {
       <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-bold">Dashboard</h1>
-          <p className="text-white/70 mt-2">Overview of your organization</p>
+          <p className="text-white/70 mt-2">
+            Overview of {orgInfo?.name || 'your organization'}
+          </p>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">

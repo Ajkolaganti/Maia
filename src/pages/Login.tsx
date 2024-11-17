@@ -88,8 +88,11 @@ const Login = () => {
         className="w-full max-w-md"
       >
         <div className="backdrop-blur-lg bg-glass-medium rounded-2xl p-8 shadow-xl border border-glass-light">
-          <div className="flex justify-center mb-8">
+          <div className="text-center mb-8">
             <Logo size="lg" />
+            <p className="text-white/70 mt-4">
+              Sign in to your Pro Team account
+            </p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">

@@ -80,10 +80,10 @@ const Logo: React.FC<LogoProps> = ({ size = 'md', showText = true }) => {
         >
           <motion.span 
             className={`font-bold ${sizeClasses[size]} bg-gradient-to-r from-primary-400 via-primary-500 to-primary-600 bg-clip-text text-transparent`}
-            whileHover={{ scale: 1.12 }}
+            whileHover={{ scale: 1.02 }}
           >
-            MIKA
-            <span className="text-primary-400 font-bold bg-gradient-to-r from-primary-400 via-primary-500 to-primary-600 bg-clip-text text-transparent">DO</span>
+            PRO
+            <span className="text-primary-400">TEAM</span>
           </motion.span>
           <span className="text-xs text-white/50 tracking-wider">WORKFORCE MANAGEMENT</span>
         </motion.div>

@@ -15,6 +15,7 @@ import {
   CheckCircle,
   XCircle,
   Clock,
+  ChevronLeft,
 } from 'lucide-react';
 import PageTransition from '../../components/shared/PageTransition';
 import { useAuth } from '../../context/AuthContext';
@@ -65,6 +66,17 @@ interface InvoiceFormData {
   taxPercentage: number;
 }
 
+interface ClientInvoiceSummary {
+  client_id: string;
+  client_name: string;
+  total_invoices: number;
+  total_amount: number;
+  paid_amount: number;
+  pending_amount: number;
+  overdue_amount: number;
+  invoices: Invoice[];
+}
+
 const formatDate = (dateString: string | null | undefined) => {
   if (!dateString) return 'N/A';
   try {
@@ -77,15 +89,15 @@ const formatDate = (dateString: string | null | undefined) => {
 
 const Invoices = () => {
   const { userData } = useAuth();
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [clients, setClients] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [clientSummaries, setClientSummaries] = useState<ClientInvoiceSummary[]>([]);
+  const [selectedClient, setSelectedClient] = useState<ClientInvoiceSummary | null>(null);
+  const [showClientInvoices, setShowClientInvoices] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [clients, setClients] = useState<Array<{ id: string; name: string }>>([]);
 
   // Form state for new invoice
   const [formData, setFormData] = useState<InvoiceFormData>({
@@ -97,31 +109,37 @@ const Invoices = () => {
     taxPercentage: 10, // Default tax percentage
   });
 
-  useEffect(() => {
-    if (userData?.organization_id) {  // Only fetch when organizationId is available
-      fetchInvoices();
-      fetchClients();
-    }
-  }, [userData?.organization_id]); // Depend on specific property, not the whole object
+  // Add clients fetch
+  const fetchClients = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('clients')
+        .select('id, name')
+        .eq('organization_id', userData?.organization_id)
+        .eq('status', 'active');
 
+      if (error) throw error;
+      setClients(data || []);
+    } catch (error) {
+      console.error('Error fetching clients:', error);
+      toast.error('Failed to load clients');
+    }
+  };
+
+  useEffect(() => {
+    if (userData?.organization_id) {
+      fetchInvoices();
+      fetchClients(); // Add clients fetch to useEffect
+    }
+  }, [userData?.organization_id]);
 
   const fetchInvoices = async () => {
-    if (!userData?.organization_id) return;
     try {
+      setLoading(true);
       const { data, error } = await supabase
         .from('invoices')
         .select(`
-          id,
-          invoice_number,
-          client_id,
-          issue_date,
-          due_date,
-          status,
-          subtotal,
-          tax,
-          total,
-          notes,
-          items,
+          *,
           client:clients (
             id,
             name,
@@ -129,51 +147,52 @@ const Invoices = () => {
             billing_address
           )
         `)
-        .eq('organization_id', userData.organization_id)
+        .eq('organization_id', userData?.organization_id)
         .order('issue_date', { ascending: false });
 
       if (error) throw error;
 
-      // Transform the data to match our interface
-      const transformedData = data?.map(invoice => ({
-        id: invoice.id,
-        invoice_number: invoice.invoice_number,
-        client_id: invoice.client_id,
-        client: {
-          name: invoice.client.name,
-          email: invoice.client.email,
-          billing_address: invoice.client.billing_address
-        },
-        issue_date: invoice.issue_date,
-        due_date: invoice.due_date,
-        status: invoice.status,
-        subtotal: invoice.subtotal,
-        tax: invoice.tax,
-        total: invoice.total,
-        items: invoice.items,
-        notes: invoice.notes
-      }));
+      // Group invoices by client
+      const summaries = data.reduce((acc: { [key: string]: ClientInvoiceSummary }, invoice) => {
+        const clientId = invoice.client_id;
+        if (!acc[clientId]) {
+          acc[clientId] = {
+            client_id: clientId,
+            client_name: invoice.client.name,
+            total_invoices: 0,
+            total_amount: 0,
+            paid_amount: 0,
+            pending_amount: 0,
+            overdue_amount: 0,
+            invoices: []
+          };
+        }
 
-      setInvoices(transformedData || []);
+        acc[clientId].total_invoices++;
+        acc[clientId].total_amount += invoice.total;
+        
+        switch (invoice.status) {
+          case 'paid':
+            acc[clientId].paid_amount += invoice.total;
+            break;
+          case 'pending':
+            acc[clientId].pending_amount += invoice.total;
+            break;
+          case 'overdue':
+            acc[clientId].overdue_amount += invoice.total;
+            break;
+        }
+
+        acc[clientId].invoices.push(invoice);
+        return acc;
+      }, {});
+
+      setClientSummaries(Object.values(summaries));
     } catch (error) {
       console.error('Error fetching invoices:', error);
+      toast.error('Failed to load invoices');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const fetchClients = async () => {
-    if (!userData?.organization_id) return;
-    try {
-      const { data, error } = await supabase
-        .from('clients')
-        .select('id, name, billing_rate')
-        .eq('organization_id', userData.organization_id);
-
-      if (error) throw error;
-      setClients(data);
-    } catch (error) {
-      console.error('Error fetching clients:', error);
     }
   };
 
@@ -417,21 +436,6 @@ const Invoices = () => {
     }
   };
 
-  const filteredInvoices = (invoices || []).filter(invoice => {
-    if (!invoice) return false;
-    
-    const searchableText = [
-      invoice.client?.name || '',
-      invoice.invoice_number || '',
-      invoice.status || '',
-    ].join(' ').toLowerCase();
-
-    const searchMatch = searchTerm ? searchableText.includes(searchTerm.toLowerCase()) : true;
-    const statusMatch = statusFilter === 'all' || invoice.status === statusFilter;
-
-    return searchMatch && statusMatch;
-  });
-
   if (loading) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -443,11 +447,10 @@ const Invoices = () => {
   return (
     <PageTransition>
       <div className="space-y-6">
-        {/* Header */}
         <div className="flex justify-between items-center">
           <div>
             <h1 className="text-3xl font-bold">Invoices</h1>
-            <p className="text-white/70 mt-2">Manage and track your invoices</p>
+            <p className="text-white/70 mt-2">Manage your client invoices</p>
           </div>
           <motion.button
             whileHover={{ scale: 1.02 }}
@@ -460,132 +463,189 @@ const Invoices = () => {
           </motion.button>
         </div>
 
-        {/* Filters */}
-        <div className="glass-card p-6">
-          <div className="flex flex-col md:flex-row gap-4 mb-6">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-white/50" />
-              <input
-                type="text"
-                placeholder="Search invoices..."
-                className="w-full pl-10 pr-4 py-2 bg-glass-light rounded-lg text-white"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <Filter className="text-white/50" />
-              <select
-                className="bg-glass-light rounded-lg px-4 py-2 text-white"
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-              >
-                <option value="all">All Status</option>
-                <option value="draft">Draft</option>
-                <option value="pending">Pending</option>
-                <option value="paid">Paid</option>
-                <option value="overdue">Overdue</option>
-              </select>
-            </div>
-          </div>
+        {showClientInvoices && selectedClient ? (
+          // Client Invoices View
+          <div className="space-y-6">
+            <button
+              onClick={() => {
+                setShowClientInvoices(false);
+                setSelectedClient(null);
+              }}
+              className="btn-secondary flex items-center gap-2"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              Back to All Clients
+            </button>
 
-          {/* Invoices Table */}
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="text-white/70 border-b border-glass-light">
-                  <th className="text-left py-4">Invoice #</th>
-                  <th className="text-left py-4">Client</th>
-                  <th className="text-left py-4">Issue Date</th>
-                  <th className="text-left py-4">Due Date</th>
-                  <th className="text-right py-4">Amount</th>
-                  <th className="text-left py-4">Status</th>
-                  <th className="text-right py-4">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredInvoices.map((invoice) => (
-                  <motion.tr
-                    key={invoice.id}
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="border-b border-glass-light"
-                  >
-                    <td className="py-4">
-                      <div className="flex items-center gap-2">
-                        <FileText className="w-4 h-4 text-primary-400" />
-                        {invoice.invoice_number}
-                      </div>
-                    </td>
-                    <td className="py-4">
-                      <div className="flex items-center gap-2">
-                        <Building2 className="w-4 h-4 text-white/50" />
-                        {invoice.client.name}
-                      </div>
-                    </td>
-                    <td className="py-4">
-                      <div className="flex items-center gap-2">
-                        <Calendar className="w-4 h-4 text-white/50" />
-                        {formatDate(invoice.issue_date)}
-                      </div>
-                    </td>
-                    <td className="py-4">
-                      {formatDate(invoice.due_date)}
-                    </td>
-                    <td className="py-4 text-right">
-                      ${invoice.total.toLocaleString()}
-                    </td>
-                    <td className="py-4">
-                      <span
-                        className={`px-2 py-1 rounded-full text-xs ${
-                          invoice.status === 'paid'
-                            ? 'bg-green-400/10 text-green-400'
-                            : invoice.status === 'overdue'
-                            ? 'bg-red-400/10 text-red-400'
-                            : invoice.status === 'pending'
-                            ? 'bg-yellow-400/10 text-yellow-400'
-                            : 'bg-blue-400/10 text-blue-400'
-                        }`}
+            <div className="glass-card p-6">
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h2 className="text-xl font-semibold">{selectedClient.client_name}</h2>
+                  <p className="text-white/70">{selectedClient.total_invoices} Invoices</p>
+                </div>
+                <div className="flex gap-4">
+                  <div className="text-center">
+                    <p className="text-sm text-white/70">Total Amount</p>
+                    <p className="text-xl font-semibold">${selectedClient.total_amount.toLocaleString()}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-sm text-white/70">Paid</p>
+                    <p className="text-xl font-semibold text-green-400">
+                      ${selectedClient.paid_amount.toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-sm text-white/70">Pending</p>
+                    <p className="text-xl font-semibold text-yellow-400">
+                      ${selectedClient.pending_amount.toLocaleString()}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Invoices Table */}
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="text-white/70 border-b border-glass-light">
+                      <th className="text-left py-4">Invoice #</th>
+                      <th className="text-left py-4">Issue Date</th>
+                      <th className="text-left py-4">Due Date</th>
+                      <th className="text-right py-4">Amount</th>
+                      <th className="text-left py-4">Status</th>
+                      <th className="text-right py-4">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedClient.invoices.map((invoice) => (
+                      <motion.tr
+                        key={invoice.id}
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className="border-b border-glass-light"
                       >
-                        {invoice.status.charAt(0).toUpperCase() + invoice.status.slice(1)}
-                      </span>
-                    </td>
-                    <td className="py-4">
-                      <div className="flex justify-end gap-2">
-                        <button
-                          onClick={() => generatePDF(invoice)}
-                          className="p-2 hover:bg-glass-light rounded-lg transition-colors"
-                          title="Download PDF"
-                        >
-                          <Download className="w-4 h-4" />
-                        </button>
-                        {invoice.status === 'draft' && (
-                          <button
-                            onClick={() => handleSendInvoice(invoice)}
-                            className="p-2 hover:bg-glass-light rounded-lg transition-colors"
-                            title="Send Invoice"
+                        <td className="py-4">
+                          <div className="flex items-center gap-2">
+                            <FileText className="w-4 h-4 text-primary-400" />
+                            {invoice.invoice_number}
+                          </div>
+                        </td>
+                        <td className="py-4">
+                          <div className="flex items-center gap-2">
+                            <Calendar className="w-4 h-4 text-white/50" />
+                            {formatDate(invoice.issue_date)}
+                          </div>
+                        </td>
+                        <td className="py-4">
+                          {formatDate(invoice.due_date)}
+                        </td>
+                        <td className="py-4 text-right">
+                          ${invoice.total.toLocaleString()}
+                        </td>
+                        <td className="py-4">
+                          <span
+                            className={`px-2 py-1 rounded-full text-xs ${
+                              invoice.status === 'paid'
+                                ? 'bg-green-400/10 text-green-400'
+                                : invoice.status === 'overdue'
+                                ? 'bg-red-400/10 text-red-400'
+                                : invoice.status === 'pending'
+                                ? 'bg-yellow-400/10 text-yellow-400'
+                                : 'bg-blue-400/10 text-blue-400'
+                            }`}
                           >
-                            <Send className="w-4 h-4" />
-                          </button>
-                        )}
-                        <button
-                          onClick={() => {
-                            setSelectedInvoice(invoice);
-                            setShowDetailsModal(true);
-                          }}
-                          className="p-2 hover:bg-glass-light rounded-lg transition-colors"
-                          title="View Details"
-                        >
-                          <MoreVertical className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </motion.tr>
-                ))}
-              </tbody>
-            </table>
+                            {invoice.status.charAt(0).toUpperCase() + invoice.status.slice(1)}
+                          </span>
+                        </td>
+                        <td className="py-4">
+                          <div className="flex justify-end gap-2">
+                            <button
+                              onClick={() => generatePDF(invoice)}
+                              className="p-2 hover:bg-glass-light rounded-lg transition-colors"
+                              title="Download PDF"
+                            >
+                              <Download className="w-4 h-4" />
+                            </button>
+                            {invoice.status === 'draft' && (
+                              <button
+                                onClick={() => handleSendInvoice(invoice)}
+                                className="p-2 hover:bg-glass-light rounded-lg transition-colors"
+                                title="Send Invoice"
+                              >
+                                <Send className="w-4 h-4" />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => {
+                                setSelectedInvoice(invoice);
+                                setShowDetailsModal(true);
+                              }}
+                              className="p-2 hover:bg-glass-light rounded-lg transition-colors"
+                              title="View Details"
+                            >
+                              <MoreVertical className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </motion.tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
-        </div>
+        ) : (
+          // Client Cards View
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {clientSummaries.map((summary) => (
+              <motion.div
+                key={summary.client_id}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="glass-card p-6 cursor-pointer hover:bg-glass-light transition-colors"
+                onClick={() => {
+                  setSelectedClient(summary);
+                  setShowClientInvoices(true);
+                }}
+              >
+                <div className="flex items-center gap-4 mb-4">
+                  <div className="w-12 h-12 rounded-lg bg-primary-500/10 flex items-center justify-center">
+                    <Building2 className="w-6 h-6 text-primary-400" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold">{summary.client_name}</h3>
+                    <p className="text-sm text-white/70">{summary.total_invoices} Invoices</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm text-white/70">Total Amount</p>
+                    <p className="font-semibold">${summary.total_amount.toLocaleString()}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-white/70">Paid Amount</p>
+                    <p className="font-semibold text-green-400">
+                      ${summary.paid_amount.toLocaleString()}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-white/70">Pending</p>
+                    <p className="font-semibold text-yellow-400">
+                      ${summary.pending_amount.toLocaleString()}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-white/70">Overdue</p>
+                    <p className="font-semibold text-red-400">
+                      ${summary.overdue_amount.toLocaleString()}
+                    </p>
+                  </div>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        )}
 
         {/* Create Invoice Modal */}
         <Modal
