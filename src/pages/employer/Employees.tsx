@@ -539,17 +539,83 @@ const Employees = () => {
     }
   };
 
-  const handleUpdateEmployee = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedEmployee) return;
-
+  const handleUpdateEmployee = async (employeeId: string, updates: any) => {
     try {
       setProcessing(true);
-      await api.employees.update(selectedEmployee.id, formData);
+
+      // First, update the user record
+      const { error: userError } = await supabase
+        .from('users')
+        .update({
+          first_name: updates.firstName,
+          last_name: updates.lastName,
+          email: updates.email,
+          phone: updates.phone,
+          client_id: updates.clientId || null,
+          role: updates.role
+        })
+        .eq('id', employeeId);
+
+      if (userError) throw userError;
+
+      // Format dates properly, ensuring they're valid or null
+      const formatDate = (dateString: string | null | undefined) => {
+        if (!dateString) return null;
+        try {
+          // Validate date format
+          const date = new Date(dateString);
+          if (isNaN(date.getTime())) return null;
+          return date.toISOString().split('T')[0]; // Format as YYYY-MM-DD
+        } catch {
+          return null;
+        }
+      };
+
+      // Prepare employee details with proper date handling
+      const employeeDetails = {
+        department: updates.department || null,
+        position: updates.position || null,
+        hire_date: formatDate(updates.hireDate),
+        salary: updates.salary || null,
+        employment_type: updates.employmentType || null,
+        status: updates.status || 'active'
+      };
+
+      // Then, update employee details if they exist, or create if they don't
+      const { data: existingDetails } = await supabase
+        .from('employee_details')
+        .select('*')
+        .eq('user_id', employeeId)
+        .single();
+
+      if (existingDetails) {
+        // Update existing details
+        const { error: detailsError } = await supabase
+          .from('employee_details')
+          .update(employeeDetails)
+          .eq('user_id', employeeId);
+
+        if (detailsError) throw detailsError;
+      } else {
+        // Create new details
+        const { error: detailsError } = await supabase
+          .from('employee_details')
+          .insert({
+            user_id: employeeId,
+            ...employeeDetails
+          });
+
+        if (detailsError) throw detailsError;
+      }
+
+      // Refresh employee list
       await fetchEmployees();
+      
+      toast.success('Employee updated successfully');
       setShowEditModal(false);
     } catch (error) {
       console.error('Error updating employee:', error);
+      toast.error('Failed to update employee');
     } finally {
       setProcessing(false);
     }

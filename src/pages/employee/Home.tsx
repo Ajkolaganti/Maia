@@ -5,11 +5,8 @@ import {
   FileText,
   CheckCircle,
   AlertCircle,
-  Calendar,
+  XCircle,
   DollarSign,
-  Building2,
-  MapPin,
-  Briefcase,
   Loader,
   BarChart2,
 } from 'lucide-react';
@@ -17,51 +14,57 @@ import PageTransition from '../../components/shared/PageTransition';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../config/supabase';
 import StatCard from '../../components/shared/StatCard';
-import { startOfMonth, endOfMonth, differenceInWeeks } from 'date-fns';
-import { format } from 'date-fns';
+import { startOfMonth, endOfMonth, format } from 'date-fns';
+import { toast } from 'react-hot-toast';
+import { useNavigate } from 'react-router-dom';
+
+interface TimesheetSummary {
+  week_starting: string;
+  week_ending: string;
+  status: string;
+  rejection_reason?: string;
+}
 
 interface DashboardStats {
   totalHours: number;
   pendingTimesheets: number;
   approvedTimesheets: number;
+  rejectedTimesheets: number;
   totalEarnings: number;
-}
-
-interface ClientInfo {
-  id: string;
-  name: string;
-  location: string;
-  industry: string;
+  currentMonthHours: number;
+  currentMonthApproved: number;
+  currentMonthPending: number;
+  currentMonthRejected: number;
+  pendingTimesheetWeeks: TimesheetSummary[];
+  rejectedTimesheetWeeks: TimesheetSummary[];
 }
 
 const EmployeeHome = () => {
   const { userData } = useAuth();
+  const navigate = useNavigate();
   const [stats, setStats] = useState<DashboardStats>({
     totalHours: 0,
     pendingTimesheets: 0,
     approvedTimesheets: 0,
+    rejectedTimesheets: 0,
     totalEarnings: 0,
+    currentMonthHours: 0,
+    currentMonthApproved: 0,
+    currentMonthPending: 0,
+    currentMonthRejected: 0,
+    pendingTimesheetWeeks: [],
+    rejectedTimesheetWeeks: []
   });
   const [loading, setLoading] = useState(true);
-  const [clientInfo, setClientInfo] = useState<ClientInfo | null>(null);
-  const [loadingClient, setLoadingClient] = useState(true);
-  const [currentMonthStats, setCurrentMonthStats] = useState({
-    totalHours: 0,
-    approvedHours: 0,
-    pendingHours: 0,
-    averageHoursPerWeek: 0
-  });
-
-  useEffect(() => {
-    if (userData?.id) {
-      fetchDashboardStats();
-      fetchClientInfo();
-      fetchCurrentMonthStats();
-    }
-  }, [userData?.id]);
 
   const fetchDashboardStats = async () => {
     try {
+      setLoading(true);
+      const currentDate = new Date();
+      const monthStart = format(startOfMonth(currentDate), 'yyyy-MM-dd');
+      const monthEnd = format(endOfMonth(currentDate), 'yyyy-MM-dd');
+
+      // Fetch all timesheets
       const { data: timesheets, error } = await supabase
         .from('timesheets')
         .select('*')
@@ -69,183 +72,110 @@ const EmployeeHome = () => {
 
       if (error) throw error;
 
-      const totalHours = timesheets?.reduce((sum, ts) => {
-        const dailyHours = typeof ts.hours === 'string' 
-          ? JSON.parse(ts.hours) 
-          : ts.hours;
-        
-        return sum + Object.values(dailyHours).reduce((daySum: number, day: any) => {
-          const [h, m] = (day.standard || '0:0').split(':').map(Number);
-          return daySum + h + (m / 60);
-        }, 0);
-      }, 0) || 0;
+      const pendingWeeks: TimesheetSummary[] = [];
+      const rejectedWeeks: TimesheetSummary[] = [];
 
-      const pendingTimesheets = timesheets?.filter(ts => ts.status === 'submitted').length || 0;
-      const approvedTimesheets = timesheets?.filter(ts => ts.status === 'approved').length || 0;
+      // Calculate total stats with null checks
+      const totalStats = (timesheets || []).reduce((acc, timesheet) => {
+        try {
+          // Safely parse hours
+          let hours = {};
+          if (timesheet.hours) {
+            hours = typeof timesheet.hours === 'string' 
+              ? JSON.parse(timesheet.hours) 
+              : timesheet.hours;
+          }
 
-      setStats({
-        totalHours: Math.round(totalHours * 100) / 100,
-        pendingTimesheets,
-        approvedTimesheets,
-        totalEarnings: 0
+          // Calculate total hours with null checks
+          const totalHours = Object.values(hours || {}).reduce((sum: number, day: any) => {
+            if (!day?.standard) return sum;
+            const [h, m] = (day.standard || '0:0').split(':').map(Number);
+            return sum + (h || 0) + ((m || 0) / 60);
+          }, 0);
+
+          // Update status counts
+          if (timesheet.status === 'submitted') acc.pendingTimesheets++;
+          if (timesheet.status === 'approved') acc.approvedTimesheets++;
+          if (timesheet.status === 'rejected') acc.rejectedTimesheets++;
+
+          // Add to total hours if approved
+          if (timesheet.status === 'approved') {
+            acc.totalHours += totalHours;
+          }
+
+          // Check if timesheet is from current month
+          const timesheetDate = new Date(timesheet.week_ending);
+          if (timesheetDate >= new Date(monthStart) && timesheetDate <= new Date(monthEnd)) {
+            acc.currentMonthHours += totalHours;
+            if (timesheet.status === 'approved') acc.currentMonthApproved++;
+            if (timesheet.status === 'submitted') acc.currentMonthPending++;
+            if (timesheet.status === 'rejected') acc.currentMonthRejected++;
+          }
+
+          // Track pending and rejected weeks
+          if (timesheet.status === 'submitted') {
+            pendingWeeks.push({
+              week_starting: timesheet.week_starting,
+              week_ending: timesheet.week_ending,
+              status: 'submitted'
+            });
+          }
+          if (timesheet.status === 'rejected') {
+            rejectedWeeks.push({
+              week_starting: timesheet.week_starting,
+              week_ending: timesheet.week_ending,
+              status: 'rejected',
+              rejection_reason: timesheet.rejection_reason
+            });
+          }
+
+          return acc;
+        } catch (err) {
+          console.error('Error processing timesheet:', err);
+          return acc;
+        }
+      }, {
+        totalHours: 0,
+        pendingTimesheets: 0,
+        approvedTimesheets: 0,
+        rejectedTimesheets: 0,
+        currentMonthHours: 0,
+        currentMonthApproved: 0,
+        currentMonthPending: 0,
+        currentMonthRejected: 0,
+        totalEarnings: 0,
+        pendingTimesheetWeeks: pendingWeeks,
+        rejectedTimesheetWeeks: rejectedWeeks
       });
+
+      setStats(totalStats);
     } catch (error) {
       console.error('Error fetching dashboard stats:', error);
+      toast.error('Failed to load dashboard statistics');
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchClientInfo = async () => {
-    if (!userData?.client_id) {
-      setLoadingClient(false);
-      return;
-    }
-
-    try {
-      const { data, error } = await supabase
-        .from('clients')
-        .select('id, name, location, industry')
-        .eq('id', userData.client_id)
-        .single();
-
-      if (error) throw error;
-      setClientInfo(data);
-    } catch (error) {
-      console.error('Error fetching client info:', error);
-    } finally {
-      setLoadingClient(false);
-    }
+  const handleWeekClick = (weekStarting: string) => {
+    navigate(`/employee/timesheets?week=${weekStarting}`);
   };
 
-  const fetchCurrentMonthStats = async () => {
-    try {
-      const startOfCurrentMonth = startOfMonth(new Date());
-      const endOfCurrentMonth = endOfMonth(new Date());
-
-      const { data: timesheets, error } = await supabase
-        .from('timesheets')
-        .select('*')
-        .eq('user_id', userData?.id)
-        .gte('week_starting', format(startOfCurrentMonth, 'yyyy-MM-dd'))
-        .lte('week_ending', format(endOfCurrentMonth, 'yyyy-MM-dd'));
-
-      if (error) throw error;
-
-      const calculateHoursFromTimesheet = (ts: any) => {
-        const dailyHours = typeof ts.hours === 'string' 
-          ? JSON.parse(ts.hours) 
-          : ts.hours;
-        
-        return Object.values(dailyHours).reduce((sum: number, day: any) => {
-          const [h, m] = (day.standard || '0:0').split(':').map(Number);
-          return sum + h + (m / 60);
-        }, 0);
-      };
-
-      const totalHours = timesheets?.reduce((sum, ts) => 
-        sum + calculateHoursFromTimesheet(ts), 0) || 0;
-
-      const approvedHours = timesheets?.reduce((sum, ts) => 
-        ts.status === 'approved' ? sum + calculateHoursFromTimesheet(ts) : sum, 0) || 0;
-
-      const pendingHours = timesheets?.reduce((sum, ts) => 
-        ts.status === 'submitted' ? sum + calculateHoursFromTimesheet(ts) : sum, 0) || 0;
-
-      const weeksInMonth = differenceInWeeks(endOfCurrentMonth, startOfCurrentMonth) + 1;
-      const averageHoursPerWeek = totalHours / weeksInMonth;
-
-      setCurrentMonthStats({
-        totalHours: Math.round(totalHours * 100) / 100,
-        approvedHours: Math.round(approvedHours * 100) / 100,
-        pendingHours: Math.round(pendingHours * 100) / 100,
-        averageHoursPerWeek: Math.round(averageHoursPerWeek * 100) / 100
-      });
-    } catch (error) {
-      console.error('Error fetching current month stats:', error);
+  useEffect(() => {
+    if (userData?.id) {
+      fetchDashboardStats();
     }
-  };
+  }, [userData?.id]);
 
   return (
     <PageTransition>
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold">Welcome back, {userData?.first_name}!</h1>
-          <p className="text-white/70 mt-2">
-            Current Month: {format(new Date(), 'MMMM yyyy')}
-          </p>
+          <h1 className="text-3xl font-bold">Dashboard</h1>
+          <p className="text-white/70 mt-2">Welcome back, {userData?.first_name}</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <StatCard
-            title="Total Hours This Month"
-            value={currentMonthStats.totalHours}
-            icon={Clock}
-            suffix="hrs"
-            loading={loading}
-            link="/employee/timesheets"
-          />
-          <StatCard
-            title="Approved Hours"
-            value={currentMonthStats.approvedHours}
-            icon={CheckCircle}
-            suffix="hrs"
-            loading={loading}
-            link="/employee/timesheets?status=approved"
-          />
-          <StatCard
-            title="Pending Hours"
-            value={currentMonthStats.pendingHours}
-            icon={AlertCircle}
-            suffix="hrs"
-            loading={loading}
-            link="/employee/timesheets?status=submitted"
-          />
-          <StatCard
-            title="Average Hours/Week"
-            value={Math.round(currentMonthStats.averageHoursPerWeek)}
-            icon={BarChart2}
-            suffix="hrs"
-            loading={loading}
-            link="/employee/timesheets"
-          />
-        </div>
-
-        {/* Client Status */}
-        <div className="glass-card p-6">
-          <h2 className="text-xl font-semibold mb-4">Current Status</h2>
-          {loadingClient ? (
-            <div className="flex justify-center">
-              <Loader className="w-6 h-6 animate-spin text-primary-500" />
-            </div>
-          ) : clientInfo ? (
-            <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <Building2 className="w-5 h-5 text-primary-400" />
-                <div>
-                  <p className="font-medium">{clientInfo.name}</p>
-                  <p className="text-sm text-white/70">Current Client</p>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm text-white/70">Location</p>
-                  <p>{clientInfo.location}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-white/70">Industry</p>
-                  <p>{clientInfo.industry}</p>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="text-center py-4">
-              <p className="text-lg font-medium">Currently on Bench</p>
-              <p className="text-white/70 mt-2">Not assigned to any client project</p>
-            </div>
-          )}
-        </div>
-
+        {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <StatCard
             title="Total Hours"
@@ -270,30 +200,82 @@ const EmployeeHome = () => {
             link="/employee/timesheets?status=approved"
           />
           <StatCard
-            title="Total Earnings"
-            value={stats.totalEarnings}
-            icon={DollarSign}
-            prefix="$"
+            title="Rejected Timesheets"
+            value={stats.rejectedTimesheets}
+            icon={XCircle}
             loading={loading}
-            link="/employee/profile"
+            link="/employee/timesheets?status=rejected"
           />
         </div>
 
-        {/* Recent Activity */}
+        {/* Current Month Stats */}
         <div className="glass-card p-6">
-          <h2 className="text-xl font-semibold mb-4">Recent Activity</h2>
-          <div className="space-y-4">
-            {/* Add recent timesheet submissions, approvals, etc. */}
+          <h2 className="text-xl font-semibold mb-4">Current Month Overview</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div>
+              <p className="text-white/70">Total Hours</p>
+              <p className="text-2xl font-semibold">{stats.currentMonthHours.toFixed(2)}hrs</p>
+            </div>
+            <div>
+              <p className="text-white/70">Pending</p>
+              <p className="text-2xl font-semibold text-yellow-400">{stats.currentMonthPending}</p>
+            </div>
+            <div>
+              <p className="text-white/70">Approved</p>
+              <p className="text-2xl font-semibold text-green-400">{stats.currentMonthApproved}</p>
+            </div>
+            <div>
+              <p className="text-white/70">Rejected</p>
+              <p className="text-2xl font-semibold text-red-400">{stats.currentMonthRejected}</p>
+            </div>
           </div>
         </div>
 
-        {/* Calendar View */}
-        <div className="glass-card p-6">
-          <h2 className="text-xl font-semibold mb-4">Work Schedule</h2>
-          <div className="h-[400px]">
-            {/* Add calendar component showing timesheet submissions */}
+        {/* Pending Timesheets Section */}
+        {stats.pendingTimesheetWeeks.length > 0 && (
+          <div className="glass-card p-6">
+            <h2 className="text-xl font-semibold mb-4 text-yellow-400">Pending Timesheets</h2>
+            <div className="space-y-3">
+              {stats.pendingTimesheetWeeks.map((week) => (
+                <div
+                  key={week.week_starting}
+                  onClick={() => handleWeekClick(week.week_starting)}
+                  className="p-4 bg-yellow-400/10 rounded-lg cursor-pointer hover:bg-yellow-400/20 transition-colors"
+                >
+                  <p className="font-medium">
+                    Week of {format(new Date(week.week_starting), 'MMM d')} - {format(new Date(week.week_ending), 'MMM d, yyyy')}
+                  </p>
+                  <p className="text-sm text-yellow-400">Awaiting Approval</p>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* Rejected Timesheets Section */}
+        {stats.rejectedTimesheetWeeks.length > 0 && (
+          <div className="glass-card p-6">
+            <h2 className="text-xl font-semibold mb-4 text-red-400">Rejected Timesheets</h2>
+            <div className="space-y-3">
+              {stats.rejectedTimesheetWeeks.map((week) => (
+                <div
+                  key={week.week_starting}
+                  onClick={() => handleWeekClick(week.week_starting)}
+                  className="p-4 bg-red-400/10 rounded-lg cursor-pointer hover:bg-red-400/20 transition-colors"
+                >
+                  <p className="font-medium">
+                    Week of {format(new Date(week.week_starting), 'MMM d')} - {format(new Date(week.week_ending), 'MMM d, yyyy')}
+                  </p>
+                  {week.rejection_reason && (
+                    <p className="text-sm text-red-400 mt-1">
+                      Reason: {week.rejection_reason}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </PageTransition>
   );

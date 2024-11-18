@@ -23,6 +23,7 @@ import { supabase } from '../../config/supabase';
 import Modal from '../../components/shared/Modal';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
+import TimesheetPreview from '../../components/shared/TimesheetPreview';
 
 interface TimesheetEntry {
   id: string;
@@ -75,6 +76,35 @@ const DocumentsModal: React.FC<DocumentsModalProps> = ({
   employeeName,
   weekEnding 
 }) => {
+  const [documentUrls, setDocumentUrls] = useState<{ [key: string]: string }>({});
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchUrls = async () => {
+      try {
+        const urls: { [key: string]: string } = {};
+        for (const doc of documents) {
+          const { data, error } = await supabase.storage
+            .from('timesheet-documents')
+            .createSignedUrl(doc, 3600); // URL valid for 1 hour
+
+          if (error) throw error;
+          urls[doc] = data.signedUrl;
+        }
+        setDocumentUrls(urls);
+      } catch (error) {
+        console.error('Error fetching document URLs:', error);
+        toast.error('Error loading documents');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (isOpen && documents.length > 0) {
+      fetchUrls();
+    }
+  }, [isOpen, documents]);
+
   return (
     <Modal
       isOpen={isOpen}
@@ -82,7 +112,11 @@ const DocumentsModal: React.FC<DocumentsModalProps> = ({
       title={`Documents - ${employeeName} (Week Ending ${format(new Date(weekEnding), 'MMM d, yyyy')})`}
     >
       <div className="space-y-4">
-        {documents.length === 0 ? (
+        {loading ? (
+          <div className="flex justify-center py-4">
+            <Loader className="w-6 h-6 animate-spin" />
+          </div>
+        ) : documents.length === 0 ? (
           <p className="text-center text-white/70">No documents attached</p>
         ) : (
           <div className="grid grid-cols-1 gap-4">
@@ -97,7 +131,7 @@ const DocumentsModal: React.FC<DocumentsModalProps> = ({
                 </div>
                 <div className="flex items-center gap-2">
                   <a
-                    href={doc}
+                    href={documentUrls[doc]}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="btn-secondary flex items-center gap-2"
@@ -106,7 +140,7 @@ const DocumentsModal: React.FC<DocumentsModalProps> = ({
                     View
                   </a>
                   <a
-                    href={doc}
+                    href={documentUrls[doc]}
                     download
                     className="btn-secondary flex items-center gap-2"
                   >
@@ -195,6 +229,18 @@ const RejectionModal: React.FC<{
       </form>
     </Modal>
   );
+};
+
+const formatHours = (hours: { [key: string]: { standard: string; comments?: string } }) => {
+  if (!hours) return '0h';
+  
+  const totalHours = Object.values(hours).reduce((sum, day) => {
+    if (!day.standard) return sum;
+    const [h, m] = day.standard.split(':').map(Number);
+    return sum + h + (m / 60);
+  }, 0);
+
+  return `${totalHours.toFixed(2)}h`;
 };
 
 const EmployerTimesheets = () => {
@@ -621,79 +667,55 @@ const EmployerTimesheets = () => {
           title="Timesheet Details"
         >
           {selectedTimesheet && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm text-white/70">Employee</label>
-                  <p className="text-white">{`${selectedTimesheet.users.first_name} ${selectedTimesheet.users.last_name}`}</p>
-                </div>
-                <div>
-                  <label className="block text-sm text-white/70">Date</label>
-                  <p className="text-white">
-                    {format(new Date(selectedTimesheet.week_ending), 'MMM d, yyyy')}
-                  </p>
-                </div>
-                <div>
-                  <label className="block text-sm text-white/70">Hours</label>
-                  <p className="text-white">{selectedTimesheet.hours}h</p>
-                </div>
-                <div>
-                  <label className="block text-sm text-white/70">Status</label>
-                  <span
-                    className={`px-2 py-1 rounded-full text-xs ${
-                      selectedTimesheet.status === 'approved'
-                        ? 'bg-green-400/10 text-green-400'
-                        : selectedTimesheet.status === 'rejected'
-                        ? 'bg-red-400/10 text-red-400'
-                        : 'bg-yellow-400/10 text-yellow-400'
-                    }`}
-                  >
-                    {selectedTimesheet.status.charAt(0).toUpperCase() + 
-                     selectedTimesheet.status.slice(1)}
-                  </span>
-                </div>
-              </div>
+            <div className="space-y-6">
+              {/* Timesheet Preview */}
+              <TimesheetPreview timesheet={selectedTimesheet} />
 
-              <div>
-                <label className="block text-sm text-white/70">Description</label>
-                <p className="text-white">{selectedTimesheet.description}</p>
-              </div>
-
+              {/* Documents section */}
               {selectedTimesheet.documents && selectedTimesheet.documents.length > 0 && (
                 <div>
-                  <label className="block text-sm text-white/70 mb-2">Documents</label>
+                  <label className="block text-sm text-white/70 mb-2">Supporting Documents</label>
                   <div className="space-y-2">
                     {selectedTimesheet.documents.map((doc, index) => (
-                      <a
+                      <button
                         key={index}
-                        href={doc}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2 text-primary-400 hover:text-primary-300"
+                        onClick={() => {
+                          setSelectedTimesheet(selectedTimesheet);
+                          setShowDocumentsModal(true);
+                          setShowDetailsModal(false);
+                        }}
+                        className="w-full flex items-center justify-between p-3 bg-glass-light rounded-lg hover:bg-glass-medium transition-colors"
                       >
-                        <FileText className="w-4 h-4" />
-                        Document {index + 1}
-                      </a>
+                        <div className="flex items-center gap-2">
+                          <FileText className="w-4 h-4 text-primary-400" />
+                          <span>Document {index + 1}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Eye className="w-4 h-4" />
+                          <span className="text-sm">View</span>
+                        </div>
+                      </button>
                     ))}
                   </div>
                 </div>
               )}
 
+              {/* Action buttons */}
               {selectedTimesheet.status === 'submitted' && (
                 <div className="flex justify-end gap-4 mt-6">
                   <button
                     onClick={() => handleRejectClick(selectedTimesheet)}
-                    className="text-red-400 hover:text-red-300"
-                    title="Reject"
+                    className="btn-secondary text-red-400 hover:text-red-300 flex items-center gap-2"
                   >
                     <XCircle className="w-5 h-5" />
+                    Reject
                   </button>
                   <button
                     onClick={() => handleTimesheetAction(selectedTimesheet.id, 'approved')}
-                    className="text-green-400 hover:text-green-300"
-                    title="Approve"
+                    className="btn-primary flex items-center gap-2"
                   >
                     <CheckCircle className="w-5 h-5" />
+                    Approve
                   </button>
                 </div>
               )}

@@ -16,7 +16,8 @@ import {
   addMonths,
   subMonths,
   addDays,
-  isSameMonth 
+  isSameMonth,
+  getDay
 } from 'date-fns';
 import { supabase } from '../../config/supabase';
 import toast from 'react-hot-toast';
@@ -42,12 +43,17 @@ interface TimesheetEntry {
   status: 'draft' | 'submitted' | 'approved' | 'rejected';
   created_at?: string;
   month_id: string;
+  rejection_reason?: string;
 }
 
-const calculateTotalHours = (hours: WeeklyHours): number => {
+const calculateTotalHours = (hours: WeeklyHours | null | undefined): number => {
+  if (!hours) return 0;
+  
   return Object.values(hours).reduce((total, dayHours) => {
-    const [h, m] = dayHours.standard.split(':').map(Number);
-    return total + h + m / 60;
+    if (!dayHours || !dayHours.standard) return total;
+    
+    const [h, m] = (dayHours.standard || '0:0').split(':').map(Number);
+    return total + (h || 0) + ((m || 0) / 60);
   }, 0);
 };
 
@@ -70,85 +76,157 @@ const Timesheets = () => {
     );
   };
 
-  const initializeWeek = (weekStart: Date): WeeklyHours => {
-    const hours: WeeklyHours = {};
+  const initializeWeek = (weekStart: Date, currentMonth: Date) => {
+    const weekDays: { [key: string]: { standard: string; comments?: string } } = {};
+    
+    // Generate all 7 days of the week
     for (let i = 0; i < 7; i++) {
       const currentDate = addDays(weekStart, i);
-      const isWeekend = currentDate.getDay() === 0 || currentDate.getDay() === 6;
-      hours[format(currentDate, 'yyyy-MM-dd')] = {
-        standard: isWeekend ? '00:00' : '08:00',
+      const dateString = format(currentDate, 'yyyy-MM-dd');
+      const dayOfWeek = getDay(currentDate); // 0 = Sunday, 1-5 = Mon-Fri, 6 = Saturday
+      
+      // Check if the day is in the current month
+      const isCurrentMonth = isSameMonth(currentDate, currentMonth);
+      
+      // Set hours based on weekday (Mon-Fri) and current month
+      weekDays[dateString] = {
+        // 1-5 are Monday to Friday, 0 is Sunday, 6 is Saturday
+        // Only set hours if it's a weekday AND in the current month
+        standard: (dayOfWeek > 0 && dayOfWeek < 6 && isCurrentMonth) ? '8:00' : '0:00',
         comments: ''
       };
     }
-    return hours;
+
+    return weekDays;
   };
 
-  const handleDocumentUpload = async (files: FileList, weekStarting: string) => {
-    if (!files.length) return [];
-    
-    try {
-      setUploading(true);
-      const uploadedUrls: string[] = [];
+  const handleDocumentUpload = async (timesheet: TimesheetEntry) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.accept = '.pdf,.doc,.docx,.png,.jpg,.jpeg';
 
-      for (const file of files) {
-        const fileExt = file.name.split('.').pop();
-        const fileName = `${weekStarting}/${Date.now()}.${fileExt}`;
+    input.onchange = async (e) => {
+      const files = (e.target as HTMLInputElement).files;
+      if (!files?.length) return;
 
-        const { data, error } = await supabase.storage
-          .from('timesheet-documents')
-          .upload(fileName, file);
+      try {
+        setUploading(true);
+        const uploadedUrls: string[] = [];
 
-        if (error) throw error;
-        uploadedUrls.push(fileName);
+        for (const file of files) {
+          const fileExt = file.name.split('.').pop();
+          const fileName = `${timesheet.week_starting}/${Date.now()}.${fileExt}`;
+
+          const { data, error } = await supabase.storage
+            .from('timesheet-documents')
+            .upload(fileName, file);
+
+          if (error) throw error;
+          uploadedUrls.push(fileName);
+        }
+
+        // First, check if a timesheet exists
+        const { data: existingTimesheet } = await supabase
+          .from('timesheets')
+          .select('*')
+          .eq('user_id', userData?.id)
+          .eq('week_starting', timesheet.week_starting)
+          .maybeSingle(); // Use maybeSingle instead of single
+
+        const documents = [
+          ...(existingTimesheet?.documents || []),
+          ...uploadedUrls
+        ];
+
+        // Update or insert timesheet
+        const { error: updateError } = await supabase
+          .from('timesheets')
+          .upsert({
+            ...timesheet,
+            user_id: userData?.id,
+            documents,
+            updated_at: new Date().toISOString()
+          });
+
+        if (updateError) throw updateError;
+
+        // Update local state
+        setTimesheets(prev => prev.map(ts => {
+          if (ts.week_starting === timesheet.week_starting) {
+            return {
+              ...ts,
+              documents
+            };
+          }
+          return ts;
+        }));
+
+        toast.success('Documents uploaded successfully');
+      } catch (error) {
+        console.error('Error uploading documents:', error);
+        toast.error('Failed to upload documents');
+      } finally {
+        setUploading(false);
       }
+    };
 
-      return uploadedUrls;
-    } catch (error) {
-      console.error('Error uploading documents:', error);
-      toast.error('Failed to upload documents');
-      return [];
-    } finally {
-      setUploading(false);
-    }
+    input.click();
   };
 
   const fetchTimesheets = async () => {
-    if (!userData?.id) return;
     try {
       setLoading(true);
       const weeks = getMonthWeeks();
       const startDate = format(weeks[0], 'yyyy-MM-dd');
       const endDate = format(weeks[weeks.length - 1], 'yyyy-MM-dd');
 
-      const { data, error } = await supabase
+      // Fetch existing timesheets for the date range
+      const { data: existingTimesheets, error } = await supabase
         .from('timesheets')
         .select('*')
-        .eq('user_id', userData.id)
-        .gte('week_starting', startDate)
-        .lte('week_ending', endDate);
+        .eq('user_id', userData?.id)
+        .or(`week_starting.gte.${startDate},week_ending.lte.${endDate}`);
 
       if (error) throw error;
 
-      const timesheetMap = new Map(data?.map(ts => [ts.week_starting, ts]));
+      console.log('Existing timesheets:', existingTimesheets);
+
+      // Initialize timesheets for each week
       const initializedTimesheets = weeks.map(weekStart => {
         const weekStartStr = format(weekStart, 'yyyy-MM-dd');
-        const weekEnd = endOfWeek(weekStart, { weekStartsOn: 1 });
-        const existingTimesheet = timesheetMap.get(weekStartStr);
-        
+        const weekEndStr = format(endOfWeek(weekStart, { weekStartsOn: 1 }), 'yyyy-MM-dd');
+
+        // Find existing timesheet for this week by exact week_starting match
+        const existingTimesheet = existingTimesheets?.find(ts => 
+          ts.week_starting === weekStartStr || ts.week_ending === weekEndStr
+        );
+
         if (existingTimesheet) {
+          console.log(`Found existing timesheet for week ${weekStartStr}:`, existingTimesheet);
+          const parsedHours = existingTimesheet.hours 
+            ? (typeof existingTimesheet.hours === 'string' 
+                ? JSON.parse(existingTimesheet.hours) 
+                : existingTimesheet.hours)
+            : null;
+          
           return {
             ...existingTimesheet,
-            hours: typeof existingTimesheet.hours === 'string' 
-              ? JSON.parse(existingTimesheet.hours) 
-              : existingTimesheet.hours
+            hours: parsedHours || initializeWeek(weekStart, currentMonth),
+            status: existingTimesheet.status || 'draft',
+            week_starting: weekStartStr,
+            week_ending: weekEndStr,
+            total_hours: calculateTotalHours(parsedHours)
           };
         }
 
-        const initialHours = initializeWeek(weekStart);
+        // Create new timesheet if none exists
+        console.log(`Creating new timesheet for week ${weekStartStr}`);
+        const initialHours = initializeWeek(weekStart, currentMonth);
         return {
-          user_id: userData.id,
+          user_id: userData?.id,
           week_starting: weekStartStr,
-          week_ending: format(weekEnd, 'yyyy-MM-dd'),
+          week_ending: weekEndStr,
           hours: initialHours,
           total_hours: calculateTotalHours(initialHours),
           status: 'draft' as const,
@@ -156,6 +234,7 @@ const Timesheets = () => {
         };
       });
 
+      console.log('Initialized timesheets:', initializedTimesheets);
       setTimesheets(initializedTimesheets);
     } catch (error) {
       console.error('Error fetching timesheets:', error);
@@ -238,58 +317,55 @@ const Timesheets = () => {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (timesheet: TimesheetEntry) => {
     if (!userData?.id) {
       toast.error('User not authenticated');
       return;
     }
 
+    // Check if documents are uploaded
+    if (!timesheet.documents || timesheet.documents.length === 0) {
+      toast.error('Please upload supporting documents before submitting the timesheet');
+      return;
+    }
+
     try {
       setUploading(true);
-      const weekStart = new Date(timesheet.week_starting);
-      const weekEnd = new Date(timesheet.week_ending);
-      const monthEntries: TimesheetEntry[] = [];
 
-      // Prepare data for first month
-      monthEntries.push({
+      // Update the timesheet status
+      const updatedTimesheet = {
         ...timesheet,
-        user_id: userData.id,
-        hours: timesheet.hours,
-        total_hours: calculateTotalHours(timesheet.hours),
-        month_id: format(weekStart, 'yyyy-MM')
-      });
+        status: 'submitted',
+        rejection_reason: null, // Clear any previous rejection reason
+        updated_at: new Date().toISOString()
+      };
 
-      // If week spans two months, prepare data for second month
-      if (!isSameMonth(weekStart, weekEnd)) {
-        monthEntries.push({
-          ...timesheet,
-          user_id: userData.id,
-          hours: timesheet.hours,
-          total_hours: calculateTotalHours(timesheet.hours),
-          month_id: format(weekEnd, 'yyyy-MM')
-        });
+      // Remove the id field if it exists (for resubmission)
+      if (updatedTimesheet.id) {
+        delete updatedTimesheet.id;
       }
 
-      // Save all month entries
-      for (const entry of monthEntries) {
-        const { error } = await supabase
-          .from('timesheets')
-          .upsert({
-            ...entry,
-            updated_at: new Date().toISOString()
-          }, {
-            onConflict: 'week_starting,month_id'
-          });
+      // First, delete the existing timesheet if it exists
+      const { error: deleteError } = await supabase
+        .from('timesheets')
+        .delete()
+        .eq('user_id', userData.id)
+        .eq('week_ending', timesheet.week_ending);
 
-        if (error) throw error;
-      }
+      if (deleteError) throw deleteError;
 
-      toast.success('Timesheet saved successfully');
+      // Then insert the new timesheet
+      const { error: insertError } = await supabase
+        .from('timesheets')
+        .insert(updatedTimesheet);
+
+      if (insertError) throw insertError;
+
+      toast.success(timesheet.status === 'rejected' ? 'Timesheet resubmitted successfully' : 'Timesheet submitted successfully');
       await fetchTimesheets(); // Refresh the data
     } catch (error) {
-      console.error('Error saving timesheet:', error);
-      toast.error('Failed to save timesheet');
+      console.error('Error submitting timesheet:', error);
+      toast.error('Failed to submit timesheet');
     } finally {
       setUploading(false);
     }
@@ -298,6 +374,24 @@ const Timesheets = () => {
   useEffect(() => {
     fetchTimesheets();
   }, [currentMonth]);
+
+  const getTimesheetStatusColor = (status: string) => {
+    switch (status) {
+      case 'submitted':
+        return 'bg-yellow-400/10 text-yellow-400';
+      case 'approved':
+        return 'bg-green-400/10 text-green-400';
+      case 'rejected':
+        return 'bg-red-400/10 text-red-400';
+      default:
+        return 'bg-glass-light text-white/70';
+    }
+  };
+
+  // Add a helper function to check if documents exist
+  const hasDocuments = (timesheet: TimesheetEntry) => {
+    return timesheet.documents && timesheet.documents.length > 0;
+  };
 
   return (
     <div className="space-y-4">
@@ -322,78 +416,53 @@ const Timesheets = () => {
 
       {loading ? (
         <div className="flex justify-center py-8">
-          <Loader className="w-8 h-8 animate-spin" />
+          <Loader className="w-8 h-8 animate-spin text-primary-500" />
         </div>
       ) : (
-        timesheets.map((timesheet, weekIndex) => (
-          <div key={timesheet.week_starting} className="glass-card">
-            <div className="border-b border-gray-800">
-              <div className="flex items-center justify-between p-4">
-                <h3 className="text-lg font-medium text-blue-400">
-                  Week {weekIndex + 1}
-                </h3>
-                <div className="flex items-center gap-4">
-                  <input
-                    type="file"
-                    multiple
-                    onChange={async (e) => {
-                      if (e.target.files) {
-                        const urls = await handleDocumentUpload(e.target.files, timesheet.week_starting);
-                        if (urls.length) {
-                          const updatedTimesheet = {
-                            ...timesheet,
-                            documents: [...(timesheet.documents || []), ...urls]
-                          };
-                          setTimesheets(prev => prev.map(ts => 
-                            ts.week_starting === timesheet.week_starting ? updatedTimesheet : ts
-                          ));
-                          await saveTimesheet(updatedTimesheet);
-                        }
-                      }
-                    }}
-                    className="hidden"
-                    id={`file-upload-${weekIndex}`}
-                  />
-                  <label 
-                    htmlFor={`file-upload-${weekIndex}`}
-                    className="flex items-center gap-2 cursor-pointer hover:text-blue-400"
-                  >
-                    <Upload className="w-4 h-4" />
-                    <span>Upload Documents</span>
-                  </label>
-                  <button
-                    onClick={() => saveTimesheet(timesheet)}
-                    className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-                  >
-                    Save Week
-                  </button>
+        <div className="space-y-6">
+          {timesheets.map((timesheet, index) => (
+            <div 
+              key={index}
+              className={`p-6 rounded-lg ${
+                timesheet.status !== 'draft' 
+                  ? getTimesheetStatusColor(timesheet.status)
+                  : 'bg-glass-light'
+              }`}
+            >
+              <div className="flex justify-between items-center mb-4">
+                <div>
+                  <h3 className="text-lg font-medium">Week {index + 1}</h3>
+                  <p className="text-sm text-white/70">
+                    {format(new Date(timesheet.week_starting), 'MMM d')} - {format(new Date(timesheet.week_ending), 'MMM d, yyyy')}
+                  </p>
                 </div>
+                {timesheet.status !== 'draft' && (
+                  <span className={`px-3 py-1 rounded-full text-sm ${getTimesheetStatusColor(timesheet.status)}`}>
+                    {timesheet.status.charAt(0).toUpperCase() + timesheet.status.slice(1)}
+                  </span>
+                )}
               </div>
-            </div>
 
-            {/* Weekly timesheet table content */}
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="text-gray-400 border-b border-gray-800">
-                    <th className="p-4 text-left">Pay Classification</th>
-                    {Object.keys(timesheet.hours).map(date => (
-                      <th key={date} className="p-4 text-center">
-                        {format(new Date(date), 'EEE')}
-                        <div className="text-sm text-gray-500">
-                          {format(new Date(date), 'd-MMM')}
-                        </div>
-                      </th>
-                    ))}
-                    <th className="p-4 text-right">Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr className="border-b border-gray-800">
-                    <td className="p-4 text-gray-300">Standard Time</td>
-                    {Object.entries(timesheet.hours).map(([date, hours]) => (
-                      <td key={date} className="p-4">
-                        <div className="flex justify-center items-center gap-2">
+              {/* Timesheet Table */}
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="text-white/70 border-b border-white/10">
+                      <th className="text-left py-2">Pay Classification</th>
+                      {Object.keys(timesheet.hours).map(date => (
+                        <th key={date} className="text-center py-2">
+                          <div>{format(new Date(date), 'EEE')}</div>
+                          <div className="text-sm">{format(new Date(date), 'd-MMM')}</div>
+                        </th>
+                      ))}
+                      <th className="text-center py-2">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td className="py-2">Standard Time</td>
+                      {Object.entries(timesheet.hours).map(([date, hours]) => (
+                        <td key={date} className="text-center py-2">
                           <input
                             type="text"
                             value={hours.standard}
@@ -402,35 +471,74 @@ const Timesheets = () => {
                               date,
                               e.target.value
                             )}
-                            className="w-16 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-center focus:border-blue-500 focus:outline-none"
+                            className="w-16 text-center bg-transparent border-b border-white/20 focus:border-primary-500 outline-none"
+                            disabled={timesheet.status !== 'draft'}
                           />
-                          <MessageCircle 
-                            className="w-4 h-4 text-gray-500 cursor-pointer hover:text-gray-400"
-                            onClick={() => {
-                              // Handle comments
-                              const comment = prompt('Add comment:', hours.comments);
-                              if (comment !== null) {
-                                handleHoursUpdate(
-                                  timesheet.week_starting,
-                                  date,
-                                  comment,
-                                  'comments'
-                                );
-                              }
-                            }}
-                          />
-                        </div>
-                      </td>
-                    ))}
-                    <td className="p-4 text-right">
-                      {timesheet.total_hours.toFixed(2)}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+                        </td>
+                      ))}
+                      <td className="text-center py-2">{timesheet.total_hours.toFixed(2)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Status and Action Buttons */}
+              <div className="flex justify-between items-center mt-4">
+                <div>
+                  <div className={`px-4 py-2 rounded-lg ${
+                    timesheet.status === 'draft' || !timesheet.status
+                      ? 'bg-yellow-400/10 text-yellow-400'
+                      : timesheet.status === 'submitted'
+                      ? 'bg-blue-400/10 text-blue-400'
+                      : timesheet.status === 'approved'
+                      ? 'bg-green-400/10 text-green-400'
+                      : 'bg-red-400/10 text-red-400'
+                  }`}>
+                    <span className="text-sm">
+                      {!timesheet.status || timesheet.status === 'draft'
+                        ? 'Not Submitted'
+                        : `Timesheet ${timesheet.status.charAt(0).toUpperCase() + timesheet.status.slice(1)}`
+                      }
+                    </span>
+                  </div>
+                  {timesheet.status === 'rejected' && timesheet.rejection_reason && (
+                    <div className="mt-2 text-sm text-red-400">
+                      <span className="font-semibold">Reason: </span>
+                      {timesheet.rejection_reason}
+                    </div>
+                  )}
+                </div>
+
+                {(!timesheet.status || timesheet.status === 'draft' || timesheet.status === 'rejected') && (
+                  <div className="flex gap-4">
+                    <button
+                      onClick={() => handleDocumentUpload(timesheet)}
+                      className={`btn-secondary flex items-center gap-2 ${
+                        hasDocuments(timesheet) ? 'bg-green-400/10 text-green-400' : ''
+                      }`}
+                    >
+                      <Upload className="w-4 h-4" />
+                      {hasDocuments(timesheet) ? 'Documents Uploaded' : 'Upload Documents'}
+                    </button>
+                    <button
+                      onClick={() => handleSubmit(timesheet)}
+                      className="btn-primary flex items-center gap-2"
+                      disabled={uploading || !hasDocuments(timesheet)}
+                    >
+                      {uploading ? (
+                        <Loader className="w-4 h-4 animate-spin" />
+                      ) : timesheet.status === 'rejected' ? (
+                        'Resubmit'
+                      ) : (
+                        'Save Week'
+                      )}
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        ))
+          ))}
+        </div>
       )}
     </div>
   );

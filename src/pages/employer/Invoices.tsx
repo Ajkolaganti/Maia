@@ -77,6 +77,14 @@ interface ClientInvoiceSummary {
   invoices: Invoice[];
 }
 
+interface TimesheetSelection {
+  id: string;
+  week_ending: string;
+  total_hours: number;
+  documents: string[];
+  selected: boolean;
+}
+
 const formatDate = (dateString: string | null | undefined) => {
   if (!dateString) return 'N/A';
   try {
@@ -98,6 +106,9 @@ const Invoices = () => {
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [processing, setProcessing] = useState(false);
   const [clients, setClients] = useState<Array<{ id: string; name: string }>>([]);
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>('');
+  const [availableTimesheets, setAvailableTimesheets] = useState<TimesheetSelection[]>([]);
+  const [employees, setEmployees] = useState<Array<{ id: string; first_name: string; last_name: string }>>([]);
 
   // Form state for new invoice
   const [formData, setFormData] = useState<InvoiceFormData>({
@@ -123,6 +134,53 @@ const Invoices = () => {
     } catch (error) {
       console.error('Error fetching clients:', error);
       toast.error('Failed to load clients');
+    }
+  };
+
+  // Add employee fetch
+  const fetchEmployees = async (clientId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('id, first_name, last_name')
+        .eq('organization_id', userData?.organization_id)
+        .eq('role', 'employee')
+        .eq('client_id', clientId);
+
+      if (error) throw error;
+      setEmployees(data || []);
+    } catch (error) {
+      console.error('Error fetching employees:', error);
+      toast.error('Failed to load employees');
+    }
+  };
+
+  // Add timesheet fetch
+  const fetchTimesheets = async (employeeId: string, startDate: string, endDate: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('timesheets')
+        .select('*')
+        .eq('user_id', employeeId)
+        .eq('status', 'approved')
+        .gte('week_ending', startDate)
+        .lte('week_ending', endDate)
+        .order('week_ending', { ascending: true });
+
+      if (error) throw error;
+
+      setAvailableTimesheets(
+        (data || []).map(ts => ({
+          id: ts.id,
+          week_ending: ts.week_ending,
+          total_hours: ts.total_hours,
+          documents: ts.documents || [],
+          selected: false
+        }))
+      );
+    } catch (error) {
+      console.error('Error fetching timesheets:', error);
+      toast.error('Failed to load timesheets');
     }
   };
 
@@ -252,52 +310,46 @@ const Invoices = () => {
 
   const handleCreateInvoice = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!userData?.organization_id) return;
-
     try {
       setProcessing(true);
-      const { subtotal, tax, total } = calculateTotals(formData.items);
-      
-      // Generate invoice number
-      const invoiceNumber = `INV-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 10000)).padStart(4, '0')}`;
 
-      const { data, error } = await supabase
+      // Calculate totals
+      const subtotal = formData.items.reduce((sum, item) => sum + item.amount, 0);
+      const tax = (subtotal * (formData.taxPercentage / 100));
+      const total = subtotal + tax;
+
+      // Get selected timesheets
+      const selectedTimesheets = availableTimesheets.filter(ts => ts.selected);
+
+      // Create invoice
+      const { data: invoice, error } = await supabase
         .from('invoices')
         .insert({
+          organization_id: userData?.organization_id,
           client_id: formData.clientId,
+          invoice_number: generateInvoiceNumber(), // You need to implement this
           issue_date: formData.issueDate,
           due_date: formData.dueDate,
-          organization_id: userData.organization_id,
-          invoice_number: invoiceNumber,
-          status: 'draft',
+          items: formData.items,
           subtotal,
           tax,
           total,
           notes: formData.notes,
-          items: formData.items.map(item => ({
-            description: item.description,
-            hours: Number(item.hours),
-            rate: Number(item.rate),
-            amount: Number(item.amount)
-          }))
+          status: 'draft',
+          timesheet_ids: selectedTimesheets.map(ts => ts.id)
         })
         .select()
         .single();
 
       if (error) throw error;
 
-      await fetchInvoices();
+      toast.success('Invoice created successfully');
       setShowCreateModal(false);
-      setFormData({
-        clientId: '',
-        issueDate: format(new Date(), 'yyyy-MM-dd'),
-        dueDate: format(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), 'yyyy-MM-dd'),
-        items: [{ description: '', hours: 0, rate: 0, amount: 0 }],
-        notes: '',
-        taxPercentage: 10, // Default tax percentage
-      });
+      await fetchInvoices(); // Refresh the invoices list
+
     } catch (error) {
       console.error('Error creating invoice:', error);
+      toast.error('Failed to create invoice');
     } finally {
       setProcessing(false);
     }
@@ -327,37 +379,34 @@ const Invoices = () => {
     try {
       setProcessing(true);
       
-      // Get organization name
-      const { data: orgData, error: orgError } = await supabase
-        .from('organizations')
-        .select('name')
-        .eq('id', userData?.organization_id)
-        .single();
+      // Get selected timesheets
+      const selectedTimesheets = availableTimesheets.filter(ts => ts.selected);
+      
+      // Get signed URLs for all timesheet documents
+      const timesheetDocuments = await Promise.all(
+        selectedTimesheets.flatMap(ts => 
+          ts.documents.map(async doc => {
+            const { data } = await supabase.storage
+              .from('timesheet-documents')
+              .createSignedUrl(doc, 3600);
+            return data?.signedUrl;
+          })
+        )
+      );
 
-      if (orgError) throw orgError;
-
-      // Call the Edge Function to send the invoice
-      const { error: emailError } = await supabase.functions.invoke('sendInvoice', {
+      // Call the sendInvoice function with timesheet documents
+      const { error } = await supabase.functions.invoke('sendInvoice', {
         body: {
-          invoice_number: invoice.invoice_number,
-          clientName: invoice.client.name,
-          clientEmail: invoice.client.email,
-          issue_date: invoice.issue_date,
-          due_date: invoice.due_date,
-          items: invoice.items,
-          subtotal: invoice.subtotal,
-          tax: invoice.tax,
-          total: invoice.total,
-          notes: invoice.notes,
-          organizationName: orgData?.name || 'Our Company',
-          billingAddress: invoice.client.billing_address
+          invoice,
+          timesheetDocuments: timesheetDocuments.filter(Boolean),
+          selectedTimesheets
         }
       });
 
-      if (emailError) throw emailError;
+      if (error) throw error;
 
-      // Update invoice status to pending
-      const { error: updateError } = await supabase
+      // Update invoice status
+      await supabase
         .from('invoices')
         .update({ 
           status: 'pending',
@@ -365,15 +414,11 @@ const Invoices = () => {
         })
         .eq('id', invoice.id);
 
-      if (updateError) throw updateError;
-
-      // Refresh invoices list
-      await fetchInvoices();
-      
       toast.success('Invoice sent successfully');
+      await fetchInvoices();
     } catch (error) {
       console.error('Error sending invoice:', error);
-      toast.error('Failed to send invoice. Please try again.');
+      toast.error('Failed to send invoice');
     } finally {
       setProcessing(false);
     }
@@ -433,6 +478,26 @@ const Invoices = () => {
       toast.error('Failed to generate PDF');
     } finally {
       setProcessing(false);
+    }
+  };
+
+  // Update client selection handler
+  const handleClientChange = async (clientId: string) => {
+    setFormData({ ...formData, clientId });
+    setSelectedEmployeeId('');
+    setAvailableTimesheets([]);
+    if (clientId) {
+      await fetchEmployees(clientId);
+    }
+  };
+
+  // Add employee selection handler
+  const handleEmployeeChange = async (employeeId: string) => {
+    setSelectedEmployeeId(employeeId);
+    setAvailableTimesheets([]);
+    
+    if (employeeId && formData.issueDate && formData.dueDate) {
+      await fetchTimesheets(employeeId, formData.issueDate, formData.dueDate);
     }
   };
 
@@ -658,7 +723,7 @@ const Invoices = () => {
               <label className="block text-sm text-white/70 mb-2">Client</label>
               <select
                 value={formData.clientId}
-                onChange={(e) => setFormData({ ...formData, clientId: e.target.value })}
+                onChange={(e) => handleClientChange(e.target.value)}
                 className="input-field"
                 required
               >
@@ -671,13 +736,38 @@ const Invoices = () => {
               </select>
             </div>
 
+            {formData.clientId && (
+              <div>
+                <label className="block text-sm text-white/70 mb-2">Employee</label>
+                <select
+                  value={selectedEmployeeId}
+                  onChange={(e) => handleEmployeeChange(e.target.value)}
+                  className="input-field"
+                  required
+                >
+                  <option value="">Select Employee</option>
+                  {employees.map(emp => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.first_name} {emp.last_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Date Range */}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm text-white/70 mb-2">Issue Date</label>
                 <input
                   type="date"
                   value={formData.issueDate}
-                  onChange={(e) => setFormData({ ...formData, issueDate: e.target.value })}
+                  onChange={(e) => {
+                    setFormData({ ...formData, issueDate: e.target.value });
+                    if (selectedEmployeeId) {
+                      fetchTimesheets(selectedEmployeeId, e.target.value, formData.dueDate);
+                    }
+                  }}
                   className="input-field"
                   required
                 />
@@ -687,12 +777,54 @@ const Invoices = () => {
                 <input
                   type="date"
                   value={formData.dueDate}
-                  onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
+                  onChange={(e) => {
+                    setFormData({ ...formData, dueDate: e.target.value });
+                    if (selectedEmployeeId) {
+                      fetchTimesheets(selectedEmployeeId, formData.issueDate, e.target.value);
+                    }
+                  }}
                   className="input-field"
                   required
                 />
               </div>
             </div>
+
+            {/* Available Timesheets */}
+            {availableTimesheets.length > 0 && (
+              <div>
+                <label className="block text-sm text-white/70 mb-2">Select Timesheets</label>
+                <div className="space-y-2 max-h-60 overflow-y-auto">
+                  {availableTimesheets.map((ts) => (
+                    <div
+                      key={ts.id}
+                      className="flex items-center justify-between p-3 bg-glass-light rounded-lg"
+                    >
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="checkbox"
+                          checked={ts.selected}
+                          onChange={(e) => {
+                            setAvailableTimesheets(prev =>
+                              prev.map(t =>
+                                t.id === ts.id ? { ...t, selected: e.target.checked } : t
+                              )
+                            );
+                          }}
+                          className="form-checkbox"
+                        />
+                        <div>
+                          <p>Week Ending: {format(new Date(ts.week_ending), 'MMM d, yyyy')}</p>
+                          <p className="text-sm text-white/70">{ts.total_hours} hours</p>
+                        </div>
+                      </div>
+                      <div className="text-sm text-white/70">
+                        {ts.documents.length} document(s)
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div>
               <div className="flex justify-between items-center mb-2">

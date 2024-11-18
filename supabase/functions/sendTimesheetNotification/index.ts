@@ -11,52 +11,32 @@ serve(async (req) => {
   }
 
   try {
-    const { email, firstName, status, reason, organizationName } = await req.json();
+    const { email, firstName, status, reason } = await req.json();
 
-    if (!email || !firstName || !status) {
-      throw new Error('Missing required parameters');
-    }
-
-    const response = await fetch('https://api.sendgrid.com/v3/mail/send', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${Deno.env.get('SENDGRID_API_KEY')}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        personalizations: [{
-          to: [{ email }],
-        }],
-        from: {
-          email: Deno.env.get('SENDGRID_FROM_EMAIL'),
-          name: organizationName || 'EMS System',
-        },
-        subject: `Timesheet ${status.charAt(0).toUpperCase() + status.slice(1)}`,
-        content: [{
-          type: 'text/html',
-          value: `
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-              <h2>Timesheet ${status}</h2>
-              <p>Dear ${firstName},</p>
-              <p>Your timesheet has been ${status}.</p>
-              ${reason ? `
-                <div style="background-color: #f8f9fa; padding: 20px; border-radius: 5px; margin: 20px 0;">
-                  <p><strong>Reason:</strong></p>
-                  <p>${reason}</p>
-                </div>
-                <p>Please review and resubmit your timesheet with the necessary corrections.</p>
-              ` : ''}
-              <p>Best regards,<br>${organizationName || 'Your Manager'}</p>
-            </div>
-          `,
-        }],
-      }),
+    // Call the sendEmail Edge Function
+    const { error } = await supabase.functions.invoke('sendEmail', {
+      body: {
+        to: email,
+        subject: `Timesheet ${status.toUpperCase()}`,
+        content: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2>Timesheet ${status.toUpperCase()}</h2>
+            <p>Hello ${firstName},</p>
+            <p>Your timesheet has been ${status}.</p>
+            ${reason ? `
+              <div style="background-color: #f8f9fa; padding: 20px; border-radius: 5px; margin: 20px 0;">
+                <p><strong>Reason:</strong></p>
+                <p>${reason}</p>
+              </div>
+              <p>Please review and resubmit your timesheet with the necessary corrections.</p>
+            ` : ''}
+            <p>Best regards,<br>Pro Team Workforce Management</p>
+          </div>
+        `
+      }
     });
 
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(`SendGrid API error: ${JSON.stringify(error)}`);
-    }
+    if (error) throw error;
 
     return new Response(
       JSON.stringify({ message: 'Notification sent successfully' }),
@@ -66,7 +46,6 @@ serve(async (req) => {
       }
     );
   } catch (error) {
-    console.error('Error:', error);
     return new Response(
       JSON.stringify({ error: error.message }),
       {
